@@ -1,0 +1,316 @@
+# backend/grpc/server.py
+import time
+import grpc
+import cv2
+import numpy as np
+import logging
+from concurrent import futures
+from pathlib import Path
+from typing import Iterator
+
+# Try multiple possible locations for generated protos (adjust if needed)
+try:
+    from backend.grpc.generated import scanner_pb2, scanner_pb2_grpc
+except Exception:
+    try:
+        from scanner.grpc.generated import scanner_pb2, scanner_pb2_grpc
+    except Exception:
+        # Minimal fallback message classes to avoid hard crash during development.
+        scanner_pb2 = None
+        scanner_pb2_grpc = None
+
+# Import the PipelineController implemented previously
+try:
+    from backend.pipeline.controller import PipelineController
+except Exception:
+    from backend.pipeline.controller import PipelineController  # try again for linter
+
+# Setup logging
+logger = logging.getLogger("GRPCServer")
+
+# Helper to save NumPy image as PNG
+def _save_frame_as_png(frame: np.ndarray, out_dir: Path, prefix: str = "frame") -> str:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = int(time.time() * 1000)
+    path = out_dir / f"{prefix}_{ts}.png"
+    # Convert BGR (OpenCV) to RGB for correct colors if needed; cv2.imwrite expects BGR, so keep as-is.
+    cv2.imwrite(str(path), frame)
+    return str(path)
+
+
+class ScannerServiceImpl:
+    """
+    Implementation wrapper that will be adapted to the generated servicer class below.
+    Exposes methods that match proto names.
+    """
+
+    def __init__(self, controller: PipelineController):
+        self.controller = controller
+        self.logger = logging.getLogger("ScannerServiceImpl")
+
+    def StartCapture(self, request):
+        """Start the FSM-driven full capture pipeline (non-blocking; FSM runs callbacks)."""
+        try:
+            self.logger.info("StartCapture called")
+            self.controller.start_scan()
+            return True, "Scan started successfully"
+        except Exception as e:
+            self.logger.error(f"StartCapture failed: {e}")
+            return False, f"Start failed: {e}"
+
+    def GetStatus(self, request):
+        try:
+            state = self.controller.current_state()
+            frame_count = len(self.controller.frames)
+            return True, state, "", frame_count
+        except Exception as e:
+            self.logger.error(f"GetStatus failed: {e}")
+            return False, "error", f"Error: {e}", 0
+
+    def PauseScan(self, request):
+        """Pause the current scan."""
+        try:
+            self.logger.info("PauseScan called")
+            self.controller.pause_scan()
+            return True, "Scan paused"
+        except Exception as e:
+            self.logger.error(f"PauseScan failed: {e}")
+            return False, f"Pause failed: {e}"
+
+    def ResumeScan(self, request):
+        """Resume a paused scan."""
+        try:
+            self.logger.info("ResumeScan called")
+            self.controller.resume_scan()
+            return True, "Scan resumed"
+        except Exception as e:
+            self.logger.error(f"ResumeScan failed: {e}")
+            return False, f"Resume failed: {e}"
+
+    def CaptureFrame(self, request):
+        """
+        Capture a single frame immediately (bypassing FSM).
+        Returns path to saved frame.
+        """
+        try:
+            self.logger.info(f"CaptureFrame called (raw={request.raw})")
+            
+            if request.raw:
+                # Capture RAW frame
+                result = self.controller.camera.capture_raw(save_dng=True)
+                if result['dng_path'] is None:
+                    return False, "", "RAW capture failed"
+                return True, result['dng_path'], "RAW frame captured"
+            else:
+                # Capture preview frame
+                frame = self.controller.camera.capture_frame()
+                if frame is None:
+                    return False, "", "No frame captured"
+                out_path = _save_frame_as_png(frame, self.controller.output_dir, prefix="capture")
+                return True, out_path, "Frame captured"
+        except Exception as e:
+            self.logger.error(f"CaptureFrame failed: {e}")
+            return False, "", f"Capture failed: {e}"
+
+    def Shutdown(self, request):
+        try:
+            self.logger.info("Shutdown called")
+            
+            # If paused, resume first to allow proper shutdown
+            if self.controller.current_state() == 'paused':
+                self.controller.resume_scan()
+            
+            self.controller.abort()
+            
+            # Cleanup resources
+            try:
+                self.controller.camera.shutdown()
+                self.logger.info("Camera shutdown complete")
+            except Exception as e:
+                self.logger.warning(f"Camera shutdown warning: {e}")
+            
+            try:
+                self.controller.motor.cleanup()
+                self.logger.info("Motor cleanup complete")
+            except Exception as e:
+                self.logger.warning(f"Motor cleanup warning: {e}")
+            
+            return True, "Shutdown completed"
+        except Exception as e:
+            self.logger.error(f"Shutdown failed: {e}")
+            return False, f"Shutdown failed: {e}"
+
+    def StreamPreview(self, request) -> Iterator:
+        """
+        Stream live preview frames as JPEG encoded data.
+        Only works when scanner is in idle state.
+        Yields PreviewFrame messages until client disconnects.
+        """
+        try:
+            fps = request.fps if request.fps > 0 else 10
+            quality = request.quality if 1 <= request.quality <= 100 else 75
+            frame_interval = 1.0 / fps
+            
+            self.logger.info(f"StreamPreview started (fps={fps}, quality={quality})")
+            
+            while True:
+                start_time = time.time()
+                
+                # Only stream if in idle state
+                current_state = self.controller.current_state()
+                if current_state != 'idle':
+                    self.logger.debug(f"Preview streaming paused - state: {current_state}")
+                    time.sleep(0.5)
+                    continue
+                
+                # Get frame from camera
+                frame = self.controller.camera.get_preview_stream_frame()
+                
+                if frame is None:
+                    time.sleep(0.1)
+                    continue
+                
+                # Encode as JPEG
+                try:
+                    # OpenCV expects BGR, convert from RGB if needed
+                    if len(frame.shape) == 3 and frame.shape[2] == 3:
+                        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    else:
+                        frame_bgr = frame
+                    
+                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                    success, buffer = cv2.imencode('.jpg', frame_bgr, encode_param)
+                    
+                    if not success:
+                        self.logger.warning("Failed to encode frame as JPEG")
+                        continue
+                    
+                    jpeg_data = buffer.tobytes()
+                    height, width = frame.shape[:2]
+                    timestamp = int(time.time() * 1000)
+                    
+                    yield jpeg_data, width, height, timestamp
+                    
+                except Exception as e:
+                    self.logger.error(f"Frame encoding error: {e}")
+                    continue
+                
+                # Rate limiting
+                elapsed = time.time() - start_time
+                sleep_time = max(0, frame_interval - elapsed)
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                    
+        except Exception as e:
+            self.logger.error(f"StreamPreview error: {e}")
+            return
+
+
+# If generated gRPC classes exist, map them to service implementation
+if scanner_pb2 is not None and scanner_pb2_grpc is not None:
+
+    class GRPCServer:
+        def __init__(self, controller: PipelineController, host: str = "[::]", port: int = 50051):
+            self.controller = controller
+            self.host = host
+            self.port = port
+            self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=6))
+            self._impl = ScannerServiceImpl(controller)
+
+            # Define and attach the servicer dynamically
+            class Servicer(scanner_pb2_grpc.ScannerServiceServicer):
+                # Implement methods matching proto
+                def StartCapture(inner_self, request, context):
+                    ok, msg = self._impl.StartCapture(request)
+                    return scanner_pb2.CaptureResponse(success=ok, message=msg)
+
+                def GetStatus(inner_self, request, context):
+                    ok, state, msg, frame_count = self._impl.GetStatus(request)
+                    return scanner_pb2.StatusResponse(
+                        success=ok,
+                        state=state,
+                        message=msg,
+                        frame_count=frame_count
+                    )
+
+                def PauseScan(inner_self, request, context):
+                    ok, msg = self._impl.PauseScan(request)
+                    return scanner_pb2.BasicResponse(success=ok, message=msg)
+
+                def ResumeScan(inner_self, request, context):
+                    ok, msg = self._impl.ResumeScan(request)
+                    return scanner_pb2.BasicResponse(success=ok, message=msg)
+
+                def CaptureFrame(inner_self, request, context):
+                    ok, path, msg = self._impl.CaptureFrame(request)
+                    return scanner_pb2.FrameCaptureResponse(success=ok, path=path, message=msg)
+
+                def Shutdown(inner_self, request, context):
+                    ok, msg = self._impl.Shutdown(request)
+                    return scanner_pb2.BasicResponse(success=ok, message=msg)
+
+                def StreamStatus(inner_self, request, context):
+                    # Server streaming of status updates until client cancels
+                    try:
+                        while not context.is_active():
+                            break
+                        
+                        while context.is_active():
+                            state = self._impl.controller.current_state()
+                            frame_count = len(self._impl.controller.frames)
+                            update = scanner_pb2.StateUpdate(
+                                state=state,
+                                message="",
+                                frame_count=frame_count
+                            )
+                            yield update
+                            time.sleep(0.5)
+                    except Exception as e:
+                        logger.error(f"StreamStatus error: {e}")
+                        return
+
+                def StreamPreview(inner_self, request, context):
+                    # Server streaming of preview frames
+                    try:
+                        for jpeg_data, width, height, timestamp in self._impl.StreamPreview(request):
+                            if not context.is_active():
+                                break
+                            
+                            frame = scanner_pb2.PreviewFrame(
+                                image_data=jpeg_data,
+                                width=width,
+                                height=height,
+                                timestamp=timestamp
+                            )
+                            yield frame
+                    except Exception as e:
+                        logger.error(f"StreamPreview gRPC error: {e}")
+                        return
+
+            scanner_pb2_grpc.add_ScannerServiceServicer_to_server(Servicer(), self.server)
+            self.server.add_insecure_port(f"{self.host}:{self.port}")
+
+        def start(self):
+            self.server.start()
+            logger.info(f"gRPC server started on {self.host}:{self.port}")
+
+        def stop(self, grace=5):
+            self.server.stop(grace)
+            logger.info("gRPC server stopped")
+
+else:
+    # Fallback stub if generated protos are missing
+    class GRPCServer:
+        def __init__(self, controller, host="[::]", port=50051):
+            raise RuntimeError("Generated protobuf modules not found. Generate them before running the server.")
+
+
+# Convenience CLI runner
+def run_server(controller: PipelineController, host: str = "[::]", port: int = 50051):
+    server = GRPCServer(controller, host, port)
+    server.start()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        server.stop(0)

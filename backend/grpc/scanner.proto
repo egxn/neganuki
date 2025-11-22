@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package scanner;
+
+// Film Scanner gRPC API
+
+service ScannerService {
+  // Start the capture pipeline
+  rpc StartCapture (CaptureRequest) returns (CaptureResponse);
+
+  // Get pipeline status
+  rpc GetStatus (StatusRequest) returns (StatusResponse);
+
+  // Pause the current scan
+  rpc PauseScan (PauseRequest) returns (BasicResponse);
+
+  // Resume a paused scan
+  rpc ResumeScan (ResumeRequest) returns (BasicResponse);
+
+  // Shutdown pipeline and cleanup
+  rpc Shutdown (ShutdownRequest) returns (BasicResponse);
+
+  // Request a single frame capture
+  rpc CaptureFrame (FrameCaptureRequest) returns (FrameCaptureResponse);
+
+  // Stream status updates
+  rpc StreamStatus (StatusRequest) returns (stream StateUpdate);
+
+  // Stream live preview (only available in idle state)
+  rpc StreamPreview (PreviewRequest) returns (stream PreviewFrame);
+}
+
+// --- Requests & Responses ---
+
+message CaptureRequest {}
+message CaptureResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message StatusRequest {}
+message StatusResponse {
+  bool success = 1;
+  string state = 2;     // Current FSM state
+  string message = 3;   // Optional human-readable message
+  int32 frame_count = 4;  // Number of frames captured
+}
+
+message PauseRequest {}
+message ResumeRequest {}
+
+message ShutdownRequest {}
+message BasicResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message FrameCaptureRequest {
+  bool raw = 1;   // true = raw Bayer, false = JPEG/PNG
+}
+
+message FrameCaptureResponse {
+  bool success = 1;
+  string path = 2;  // path to saved frame on disk
+  string message = 3;
+}
+
+message StateUpdate {
+  string state = 1;
+  string message = 2;
+  int32 frame_count = 3;
+}
+
+message PreviewRequest {
+  int32 fps = 1;  // Desired frames per second (default: 10)
+  int32 quality = 2;  // JPEG quality 1-100 (default: 75)
+}
+
+message PreviewFrame {
+  bytes image_data = 1;  // JPEG encoded frame
+  int32 width = 2;
+  int32 height = 3;
+  int64 timestamp = 4;  // Unix timestamp in milliseconds
+}

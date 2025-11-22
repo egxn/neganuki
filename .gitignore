@@ -1,0 +1,110 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+.pyenv/
+
+# Poetry
+poetry.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+*.cover
+.cache
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# Pytype
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# Generated files
+backend/grpc/generated/*.py
+!backend/grpc/generated/__init__.py
+
+# Pre-commit
+.pre-commit-config.yaml.bak
+
+# Logs
+*.log
+logs/
+
+# Output
+output/
+scans/
+frames/
+*.tiff
+*.tif
+*.dng
+*.png
+*.jpg
+*.jpeg
+
+# Temporary files
+*.tmp
+*.temp
+.temp/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Raspberry Pi specific
+*.o
+*.ko
+*.mod.c
+
+# Development
+.env
+.env.local
+.env.*.local

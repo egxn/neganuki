@@ -1,0 +1,112 @@
+# State machine definition for the film scanner
+
+initial: idle
+
+states:
+  - name: idle
+    on_enter: on_enter_idle
+  - name: initializing
+    on_enter: on_enter_initializing
+  - name: capturing
+    on_enter: on_enter_capturing
+  - name: evaluating
+    on_enter: on_enter_evaluating
+  - name: stitching
+    on_enter: on_enter_stitching
+  - name: advancing
+    on_enter: on_enter_advancing
+  - name: checking_completion
+    on_enter: on_enter_checking_completion
+  - name: paused
+    on_enter: on_enter_paused
+  - name: finished
+    on_enter: on_enter_finished
+  - name: error
+    on_enter: on_enter_error
+  - name: camera_error
+    on_enter: on_enter_camera_error
+  - name: motor_error
+    on_enter: on_enter_motor_error
+
+transitions:
+  # Inicio del proceso
+  - trigger: start
+    source: idle
+    dest: initializing
+
+  - trigger: init_done
+    source: initializing
+    dest: capturing
+
+  # Flujo de captura y evaluación
+  - trigger: capture_done
+    source: capturing
+    dest: evaluating
+
+  - trigger: retry_capture
+    source: evaluating
+    dest: capturing
+    conditions: is_retry_allowed
+
+  - trigger: accept_capture
+    source: evaluating
+    dest: stitching
+
+  # Stitching y avance
+  - trigger: stitch_done
+    source: stitching
+    dest: advancing
+
+  - trigger: advance_done
+    source: advancing
+    dest: checking_completion
+
+  # Verificación de completitud
+  - trigger: more_frames
+    source: checking_completion
+    dest: capturing
+
+  - trigger: scan_complete
+    source: checking_completion
+    dest: finished
+
+  # Control de pausa/reanudación
+  - trigger: pause
+    source: [capturing, evaluating, stitching, advancing]
+    dest: paused
+
+  - trigger: resume
+    source: paused
+    dest: capturing
+
+  # Manejo de errores y recuperación
+  - trigger: fail
+    source: '*'
+    dest: error
+
+  - trigger: camera_fail
+    source: [capturing, evaluating]
+    dest: camera_error
+
+  - trigger: motor_fail
+    source: advancing
+    dest: motor_error
+
+  - trigger: recover
+    source: error
+    dest: idle
+    conditions: is_recoverable
+
+  - trigger: recover_camera
+    source: camera_error
+    dest: capturing
+    conditions: is_camera_recoverable
+
+  - trigger: recover_motor
+    source: motor_error
+    dest: advancing
+    conditions: is_motor_recoverable
+
+  - trigger: abort
+    source: '*'
+    dest: finished

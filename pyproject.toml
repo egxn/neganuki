@@ -1,0 +1,122 @@
+[tool.poetry]
+name = "neganuki-film-scanner"
+version = "0.0.1"
+description = "Modular film‑scanning system built on Raspberry Pi + IMX477 + manual lens + stepper motor"
+authors = ["egxn"]
+readme = "README.md"
+packages = [{ include = "backend" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+
+# Image / RAW
+tifffile = "^2025.10.16"               # TIFF 16-bit support (BigTIFF etc.).
+rawpy = "^0.25.1"                      # LibRaw wrapper for RAW processing.
+
+# Image processing
+pillow = "^10.0.0"
+numpy = "^2.3.5"
+opencv-python = "^4.9.0"
+# opencv-python-headless = "4.12.0.88"
+# scikit-image = "0.25.2" 
+
+# State machine
+transitions = "^0.9.3"
+
+# gRPC
+grpcio = "^1.76.0"
+grpcio-tools = "^1.76.0"
+
+# Motor control (choose 1 depending on your final setup)
+rpi-lgpio = "^0.6"
+
+# Camera libs (IMX477 via libcamera)
+picamera2 = { version = "^0.3.16", optional = true }
+
+# Utilities
+loguru = "^0.7.2"
+
+[tool.poetry.group.dev.dependencies]
+# Commit message formatting and version bumping
+commitizen = "^3.13.0"
+
+# Pre-commit hooks
+pre-commit = "^3.6.0"
+
+# Code formatting and linting
+black = "^23.12.0"
+isort = "^5.13.0"
+flake8 = "^7.0.0"
+
+# Testing
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+
+[tool.poetry.extras]
+gpio = ["rpi-lgpio"]
+camera = ["picamera2"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+generate-protos = "scanner.grpc.codegen:run"
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.0.1"
+tag_format = "v$version"
+version_files = [
+    "pyproject.toml:version"
+]
+update_changelog_on_bump = true
+major_version_zero = true
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | backend/grpc/generated
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_gitignore = true
+skip = ["backend/grpc/generated"]
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "backend/grpc/generated"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]

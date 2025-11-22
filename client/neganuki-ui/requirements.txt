@@ -1,0 +1,14 @@
+# Neganuki Scanner GUI Requirements
+# Install with: pip install -r requirements.txt
+
+# Core dependencies
+grpcio>=1.76.0
+grpcio-tools>=1.76.0
+protobuf>=4.25.0
+
+# Image handling
+Pillow>=10.0.0
+
+# Tkinter is usually included with Python
+# On Ubuntu/Debian if missing:
+# sudo apt-get install python3-tk

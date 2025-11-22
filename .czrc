@@ -1,0 +1,11 @@
+{
+  "commitizen": {
+    "name": "cz_conventional_commits",
+    "version": "3.0.0",
+    "tag_format": "v$version",
+    "version_scheme": "semver",
+    "version_files": [
+      "pyproject.toml:version"
+    ]
+  }
+}
