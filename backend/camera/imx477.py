@@ -275,6 +275,13 @@ class IMX477Camera:
                     if dng_path is None:
                         dng_path = os.path.join(tempfile.gettempdir(), "capture_{}.tiff".format(os.getpid()))
                         logger.debug("No path specified, using temporary path: %s", dng_path)
+                    else:
+                        # Ensure parent directory exists
+                        parent_dir = os.path.dirname(dng_path)
+                        if parent_dir and not os.path.exists(parent_dir):
+                            logger.debug("Creating parent directory: %s", parent_dir)
+                            os.makedirs(parent_dir, exist_ok=True)
+                        logger.debug("Using specified path: %s", dng_path)
 
                     if tifffile is not None:
                         logger.debug("Saving with tifffile as 16-bit TIFF...")

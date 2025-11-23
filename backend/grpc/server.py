@@ -110,7 +110,13 @@ class ScannerServiceImpl:
                 self.logger.info("Starting RAW frame capture...")
                 self.logger.debug("Current camera mode: %s", self.controller.camera.mode)
                 
-                result = self.controller.camera.capture_raw(save_dng=True)
+                # Generate path in output directory (same as RGB captures)
+                self.controller.output_dir.mkdir(parents=True, exist_ok=True)
+                ts = int(time.time() * 1000)
+                raw_path = self.controller.output_dir / f"capture_raw_{ts}.tiff"
+                self.logger.info(f"RAW will be saved to: {raw_path}")
+                
+                result = self.controller.camera.capture_raw(save_dng=True, dng_path=str(raw_path))
                 
                 self.logger.debug("RAW capture result: bayer=%s, meta=%s, dng_path=%s",
                                  "available" if result.get('bayer') is not None else "None",
