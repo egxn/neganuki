@@ -281,76 +281,104 @@ class IMX477Camera:
             return None
 
     def capture_raw(self, save_dng: bool = True, dng_path: Optional[str] = None) -> dict:
-        """Capture a RAW Bayer frame and optionally save to TIFF."""
+        """Capture a RAW Bayer frame and optionally save to TIFF.
+        
+        Uses switch_mode_and_capture_array to temporarily capture RAW
+        without fully reconfiguring the camera.
+        """
         logger.info("Starting RAW capture (save_dng=%s, dng_path=%s)", save_dng, dng_path)
         
         if not self.picam:
             logger.error("RAW capture failed: Picamera2 not available")
             raise RuntimeError("Picamera2 not available")
 
-        restore_mode = None
-        reconfigured = False
+        # Create a RAW configuration for the capture
+        logger.info("Creating RAW configuration for capture...")
+        raw_config = self._create_raw_config()
         
-        if self.mode in ("preview", "dual"):
-            restore_mode = self.mode
-            logger.info("Current mode is '%s', attempting to switch to raw mode for capture", self.mode)
-            try:
-                self.reconfigure("raw")
-                reconfigured = True
-                logger.info("Successfully reconfigured camera to raw mode")
-            except Exception as e:
-                logger.error("Failed to reconfigure to RAW mode: %s", e, exc_info=True)
-                logger.warning("Will attempt capture in current mode instead")
-                # Don't return error yet, try to capture anyway
-        else:
-            logger.info("Camera already in raw mode, proceeding with capture")
-
-        # Capture data and metadata in one go
+        # Check if we actually got RAW or fallback RGB
+        config_format = raw_config.get("main", {}).get("format", "")
+        logger.info(f"RAW config format: {config_format}")
+        
+        # Capture data and metadata using switch_mode
         raw_arr = None
         meta = None
         capture_success = False
         
         try:
-            logger.debug("Capturing raw request from camera...")
-            request = self.picam.capture_request()
-            logger.debug("Making array from capture request...")
-            raw_arr = request.make_array()
-            logger.debug("Extracting metadata from capture request...")
-            meta = request.get_metadata()
-            logger.debug("Releasing capture request...")
-            request.release()
+            logger.info("Using switch_mode_and_capture_array for RAW capture...")
+            
+            # This method temporarily switches to RAW mode, captures, and switches back
+            # It's designed exactly for this use case!
+            request = self.picam.switch_mode_and_capture_array(raw_config)
+            raw_arr = request
+            
+            # Try to get metadata if available
+            try:
+                meta = self.picam.capture_metadata()
+            except:
+                meta = {}
             
             if raw_arr is not None:
-                logger.info("Raw capture successful: array shape=%s, dtype=%s", 
+                logger.info("RAW capture successful: array shape=%s, dtype=%s", 
                            raw_arr.shape, raw_arr.dtype)
                 capture_success = True
             else:
-                logger.warning("capture_request succeeded but array is None")
+                logger.warning("switch_mode_and_capture_array returned None")
                 
-        except Exception as e:
-            logger.error("Raw capture failed during capture_request: %s", e, exc_info=True)
+        except AttributeError:
+            # switch_mode_and_capture_array not available, try alternative
+            logger.warning("switch_mode_and_capture_array not available, trying manual stop/start method")
             
-            # If we reconfigured and capture failed, try to restore and capture as high-quality RGB
-            if reconfigured and restore_mode is not None:
-                logger.info("Capture failed after reconfigure, restoring to %s mode and trying RGB capture", restore_mode)
+            try:
+                # Stop preview
+                logger.debug("Stopping camera for RAW capture...")
+                self.picam.stop()
+                
+                # Configure for RAW
+                logger.debug("Configuring for RAW...")
+                self.picam.configure(raw_config)
+                
+                # Start in RAW mode
+                logger.debug("Starting camera in RAW mode...")
+                self.picam.start()
+                
+                # Capture
+                logger.debug("Capturing RAW array...")
+                request = self.picam.capture_request()
+                raw_arr = request.make_array()
+                meta = request.get_metadata()
+                request.release()
+                
+                if raw_arr is not None:
+                    logger.info("RAW capture successful: array shape=%s, dtype=%s", 
+                               raw_arr.shape, raw_arr.dtype)
+                    capture_success = True
+                
+                # Restart in preview mode
+                logger.debug("Restarting in preview mode...")
+                self.picam.stop()
+                preview_config = self._create_preview_config()
+                self.picam.configure(preview_config)
+                self.picam.start()
+                logger.info("Camera restored to preview mode")
+                
+            except Exception as e:
+                logger.error("Manual RAW capture failed: %s", e, exc_info=True)
+                
+                # Try to restore preview mode
                 try:
-                    self.reconfigure(restore_mode)
-                    logger.info("Attempting high-quality RGB capture as fallback...")
-                    
-                    # Try to capture a regular frame as fallback
-                    request = self.picam.capture_request()
-                    raw_arr = request.make_array()
-                    meta = request.get_metadata()
-                    request.release()
-                    
-                    if raw_arr is not None:
-                        logger.warning("RAW capture failed but RGB fallback succeeded: shape=%s, dtype=%s", 
-                                     raw_arr.shape, raw_arr.dtype)
-                        capture_success = True
-                        reconfigured = False  # Already restored
-                    
+                    logger.info("Attempting to restore preview mode after error...")
+                    self.picam.stop()
+                    preview_config = self._create_preview_config()
+                    self.picam.configure(preview_config)
+                    self.picam.start()
+                    logger.info("Preview mode restored")
                 except Exception as restore_error:
-                    logger.error("Failed to restore camera mode and capture RGB fallback: %s", restore_error, exc_info=True)
+                    logger.error("Failed to restore preview mode: %s", restore_error)
+                    
+        except Exception as e:
+            logger.error("RAW capture failed: %s", e, exc_info=True)
 
         dng_saved_path = None
         if raw_arr is not None:
@@ -407,15 +435,6 @@ class IMX477Camera:
         else:
             logger.warning("Raw array is None, capture failed")
             result = {"bayer": None, "meta": meta, "dng_path": None}
-
-        # Restore original mode if we reconfigured successfully
-        if reconfigured and restore_mode is not None:
-            logger.info("Restoring camera to previous mode: %s", restore_mode)
-            try:
-                self.reconfigure(restore_mode)
-                logger.info("Successfully restored camera to %s mode", restore_mode)
-            except Exception as e:
-                logger.error("Failed to restore camera mode: %s", e, exc_info=True)
 
         return result
 
