@@ -8,16 +8,26 @@ from concurrent import futures
 from pathlib import Path
 from typing import Iterator
 
+# Setup logging early
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("GRPCServer")
+
 # Try multiple possible locations for generated protos (adjust if needed)
 try:
     from backend.grpc.generated import scanner_pb2, scanner_pb2_grpc
-except Exception:
-    try:
-        from scanner.grpc.generated import scanner_pb2, scanner_pb2_grpc
-    except Exception:
-        # Minimal fallback message classes to avoid hard crash during development.
-        scanner_pb2 = None
-        scanner_pb2_grpc = None
+    logger.info("✓ Protobuf modules loaded successfully")
+except ImportError as e:
+    logger.error(f"Failed to import protobuf modules: {e}")
+    logger.error("Run: poetry run generate-protos")
+    scanner_pb2 = None
+    scanner_pb2_grpc = None
+except Exception as e:
+    logger.error(f"Unexpected error loading protobuf modules: {e}")
+    scanner_pb2 = None
+    scanner_pb2_grpc = None
 
 # Import the PipelineController implemented previously
 try:
@@ -319,12 +329,6 @@ def run_server(controller: PipelineController, host: str = "[::]", port: int = 5
 if __name__ == "__main__":
     import argparse
     from pathlib import Path
-    
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
     
     parser = argparse.ArgumentParser(description='Film Scanner gRPC Server')
     parser.add_argument('--host', default='[::]', help='Server host (default: [::])')
