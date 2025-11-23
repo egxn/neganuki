@@ -89,7 +89,7 @@ poetry shell
 Or run commands inside it without activating:
 
 ```bash
-poetry run python backend/main.py
+poetry run python backend/grpc/server.py
 ```
 
 ### 4. Adding Dependencies
