@@ -740,8 +740,8 @@ class ScannerGUI:
     def _preview_stream_loop(self):
         """Background loop for receiving and displaying preview stream."""
         try:
-            # Request preview stream with 10 FPS and 75% quality
-            request = scanner_pb2.PreviewRequest(fps=10, quality=75)
+            # Request preview stream with 20 FPS and 60% quality for faster streaming
+            request = scanner_pb2.PreviewRequest(fps=20, quality=60)
             stream = self.stub.StreamPreview(request)
             
             for frame_msg in stream:

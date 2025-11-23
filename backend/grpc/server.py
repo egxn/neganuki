@@ -237,11 +237,13 @@ class ScannerServiceImpl:
             
             self.logger.info(f"MoveMotor called: {abs_steps} steps {direction}")
             
-            # Move the motor
-            if steps > 0:
-                self.controller.motor.forward(abs_steps)
-            else:
-                self.controller.motor.backward(abs_steps)
+            # Move the motor using step method
+            # direction: 1 = forward (CW), -1 = backward (CCW)
+            motor_direction = 1 if steps > 0 else -1
+            success = self.controller.motor.step(abs_steps, motor_direction)
+            
+            if not success:
+                return False, f"Motor step failed"
             
             return True, f"Motor moved {abs_steps} steps {direction}"
             

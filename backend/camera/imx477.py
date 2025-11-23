@@ -24,6 +24,11 @@ import numpy as np
 from loguru import logger
 
 try:
+    import cv2
+except Exception:
+    cv2 = None
+
+try:
     from picamera2 import Picamera2
     from picamera2.encoders import JpegEncoder
     from picamera2 import Preview
@@ -190,7 +195,8 @@ class IMX477Camera:
         """Get a single frame from the preview stream without stopping/starting.
         
         This is optimized for continuous streaming when camera is already running
-        in preview mode. Returns None if camera is not in preview mode or not running.
+        in preview mode. Returns a downscaled frame for faster network transmission.
+        Returns None if camera is not in preview mode or not running.
         """
         if not self.picam:
             return None
@@ -202,7 +208,18 @@ class IMX477Camera:
         try:
             # Use capture_array for lightweight frame grab
             frame = self.picam.capture_array()
-            return np.array(frame)
+            
+            # Downscale to 1/4 resolution for faster streaming (1014x760 instead of 4056x3040)
+            # This makes encoding and network transfer much faster
+            if cv2 is not None:
+                height, width = frame.shape[:2]
+                new_width = width // 4
+                new_height = height // 4
+                frame_small = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                return np.array(frame_small)
+            else:
+                # If cv2 not available, return full resolution
+                return np.array(frame)
         except Exception as e:
             logger.debug(f"Preview stream frame capture failed: {e}")
             return None
