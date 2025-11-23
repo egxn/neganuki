@@ -61,7 +61,7 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-generate-protos = "scanner.grpc.codegen:run"
+generate-protos = "backend.grpc.codegen:run"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
