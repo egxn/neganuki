@@ -107,19 +107,38 @@ class ScannerServiceImpl:
             
             if request.raw:
                 # Capture RAW frame
+                self.logger.info("Starting RAW frame capture...")
+                self.logger.debug("Current camera mode: %s", self.controller.camera.mode)
+                
                 result = self.controller.camera.capture_raw(save_dng=True)
+                
+                self.logger.debug("RAW capture result: bayer=%s, meta=%s, dng_path=%s",
+                                 "available" if result.get('bayer') is not None else "None",
+                                 "available" if result.get('meta') is not None else "None",
+                                 result.get('dng_path'))
+                
                 if result['dng_path'] is None:
-                    return False, "", "RAW capture failed"
+                    self.logger.error("RAW capture failed: dng_path is None")
+                    return False, "", "RAW capture failed - no file saved"
+                
+                self.logger.info(f"✓ RAW frame captured successfully: {result['dng_path']}")
                 return True, result['dng_path'], "RAW frame captured"
             else:
                 # Capture preview frame
+                self.logger.info("Starting RGB frame capture...")
                 frame = self.controller.camera.capture_frame()
+                
                 if frame is None:
+                    self.logger.error("RGB capture failed: camera returned None")
                     return False, "", "No frame captured"
+                
+                self.logger.debug("Frame captured: shape=%s, dtype=%s", frame.shape, frame.dtype)
                 out_path = _save_frame_as_png(frame, self.controller.output_dir, prefix="capture")
+                self.logger.info(f"✓ RGB frame saved to: {out_path}")
                 return True, out_path, "Frame captured"
+                
         except Exception as e:
-            self.logger.error(f"CaptureFrame failed: {e}")
+            self.logger.error(f"CaptureFrame failed with exception: {e}", exc_info=True)
             return False, "", f"Capture failed: {e}"
 
     def Shutdown(self, request):

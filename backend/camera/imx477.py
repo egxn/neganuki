@@ -226,58 +226,90 @@ class IMX477Camera:
 
     def capture_raw(self, save_dng: bool = True, dng_path: Optional[str] = None) -> dict:
         """Capture a RAW Bayer frame and optionally save to TIFF."""
+        logger.info("Starting RAW capture (save_dng=%s, dng_path=%s)", save_dng, dng_path)
+        
         if not self.picam:
+            logger.error("RAW capture failed: Picamera2 not available")
             raise RuntimeError("Picamera2 not available")
 
         restore_mode = None
         if self.mode in ("preview", "dual"):
             restore_mode = self.mode
-            logger.info("Switching to raw mode for capture")
+            logger.info("Current mode is '%s', switching to raw mode for capture", self.mode)
             try:
                 self.reconfigure("raw")
+                logger.info("Successfully reconfigured camera to raw mode")
             except Exception as e:
                 logger.error("Failed to configure RAW mode: %s", e)
                 return {"bayer": None, "meta": None, "dng_path": None}
+        else:
+            logger.info("Camera already in raw mode, proceeding with capture")
 
         # Capture data and metadata in one go
         raw_arr = None
         meta = None
         try:
+            logger.debug("Capturing raw request from camera...")
             request = self.picam.capture_request()
+            logger.debug("Making array from capture request...")
             raw_arr = request.make_array()
+            logger.debug("Extracting metadata from capture request...")
             meta = request.get_metadata()
+            logger.debug("Releasing capture request...")
             request.release()
+            logger.info("Raw capture successful: array shape=%s, dtype=%s", 
+                       raw_arr.shape if raw_arr is not None else "None", 
+                       raw_arr.dtype if raw_arr is not None else "None")
         except Exception as e:
-            logger.error("Raw capture failed: %s", e)
+            logger.error("Raw capture failed during capture_request: %s", e, exc_info=True)
 
         dng_saved_path = None
         if raw_arr is not None:
+            logger.debug("Processing captured raw array...")
             bayer = self._normalize_bayer_to_uint16(raw_arr)
+            logger.info("Raw array normalized to uint16: shape=%s", bayer.shape if bayer is not None else "None")
 
             if save_dng:
+                logger.debug("Attempting to save raw data to file...")
                 try:
                     if dng_path is None:
                         dng_path = os.path.join(tempfile.gettempdir(), "capture_{}.tiff".format(os.getpid()))
+                        logger.debug("No path specified, using temporary path: %s", dng_path)
 
                     if tifffile is not None:
+                        logger.debug("Saving with tifffile as 16-bit TIFF...")
                         tifffile.imwrite(dng_path, bayer.astype(np.uint16))
                         dng_saved_path = dng_path
-                        logger.info("Saved RAW Bayer as 16-bit TIFF: %s", dng_path)
+                        logger.info("✓ Saved RAW Bayer as 16-bit TIFF: %s (size: %d bytes)", 
+                                   dng_path, os.path.getsize(dng_path) if os.path.exists(dng_path) else 0)
                     else:
+                        logger.warning("tifffile library not installed, falling back to numpy .npy format")
                         alt = dng_path.replace('.tiff', '.npy') if dng_path.endswith('.tiff') else dng_path + '.npy'
                         np.save(alt, bayer)
                         dng_saved_path = alt
-                        logger.warning("tifffile not installed, saved raw array as .npy: %s", alt)
+                        logger.warning("Saved raw array as .npy: %s (size: %d bytes)", 
+                                     alt, os.path.getsize(alt) if os.path.exists(alt) else 0)
                 except Exception as e:
-                    logger.error("Failed to save raw data: %s", e)
+                    logger.error("Failed to save raw data to disk: %s", e, exc_info=True)
+            else:
+                logger.info("save_dng=False, skipping file save")
 
             result = {"bayer": bayer, "meta": meta, "dng_path": dng_saved_path}
+            logger.info("RAW capture complete: bayer=%s, meta_keys=%s, saved_to=%s", 
+                       "available" if bayer is not None else "None",
+                       list(meta.keys()) if meta else "None",
+                       dng_saved_path)
         else:
+            logger.warning("Raw array is None, capture may have failed")
             result = {"bayer": None, "meta": meta, "dng_path": None}
 
         if restore_mode is not None:
-            logger.info("Restoring camera mode: %s", restore_mode)
-            self.reconfigure(restore_mode)
+            logger.info("Restoring camera to previous mode: %s", restore_mode)
+            try:
+                self.reconfigure(restore_mode)
+                logger.info("Successfully restored camera to %s mode", restore_mode)
+            except Exception as e:
+                logger.error("Failed to restore camera mode: %s", e, exc_info=True)
 
         return result
 
@@ -290,35 +322,54 @@ class IMX477Camera:
         sometimes 8-bit. This function attempts to standardize to uint16.
         """
         if arr is None:
+            logger.warning("_normalize_bayer_to_uint16 received None array")
             return None
 
         arr = np.array(arr)
+        logger.debug("Normalizing Bayer array: shape=%s, dtype=%s, min=%s, max=%s", 
+                    arr.shape, arr.dtype, arr.min(), arr.max())
+        
         if arr.dtype == np.uint16:
             # assume already fine
+            logger.debug("Array already uint16, no conversion needed")
             return arr
         elif arr.dtype == np.uint8:
             # scale 8-bit to 16-bit
-            return (arr.astype(np.uint16) << 8)
+            logger.info("Converting uint8 to uint16 (bit shift left by 8)")
+            result = (arr.astype(np.uint16) << 8)
+            logger.debug("Conversion complete: new range [%d, %d]", result.min(), result.max())
+            return result
         elif arr.dtype == np.float32 or arr.dtype == np.float64:
             # normalize float to 16-bit
+            logger.info("Converting float to uint16 (normalizing to [0, 65535])")
             vmin = arr.min()
             vmax = arr.max()
+            logger.debug("Float range: [%f, %f]", vmin, vmax)
             if vmax == vmin:
+                logger.warning("Float array has constant value, returning zeros")
                 return (arr * 0).astype(np.uint16)
             norm = (arr - vmin) / (vmax - vmin)
-            return (norm * 65535).astype(np.uint16)
+            result = (norm * 65535).astype(np.uint16)
+            logger.debug("Conversion complete: new range [%d, %d]", result.min(), result.max())
+            return result
         else:
             # unknown type: cast and scale conservatively
+            logger.warning("Unknown dtype %s, attempting conservative conversion", arr.dtype)
             try:
                 max_val = arr.max()
+                logger.debug("Array max value: %d", max_val)
                 if max_val <= 255:
+                    logger.info("Max value <= 255, treating as 8-bit (shift left by 8)")
                     return (arr.astype(np.uint16) << 8)
                 elif max_val <= 4095:
                     # 12-bit -> scale to 16-bit
+                    logger.info("Max value <= 4095, treating as 12-bit (shift left by 4)")
                     return (arr.astype(np.uint16) << 4)
                 else:
+                    logger.info("Max value > 4095, direct cast to uint16")
                     return arr.astype(np.uint16)
-            except Exception:
+            except Exception as e:
+                logger.error("Conversion failed, falling back to direct cast: %s", e)
                 return arr.astype(np.uint16)
 
     # Small helper to test availability
