@@ -289,13 +289,22 @@ class IMX477Camera:
                         dng_saved_path = dng_path
                         logger.info("✓ Saved RAW Bayer as 16-bit TIFF: %s (size: %d bytes)", 
                                    dng_path, os.path.getsize(dng_path) if os.path.exists(dng_path) else 0)
+                    elif cv2 is not None:
+                        logger.warning("tifffile library not installed, using OpenCV to save as 16-bit PNG")
+                        # Use cv2 to save as 16-bit PNG instead
+                        png_path = dng_path.replace('.tiff', '.png') if dng_path.endswith('.tiff') else dng_path + '.png'
+                        cv2.imwrite(png_path, bayer.astype(np.uint16))
+                        dng_saved_path = png_path
+                        logger.info("✓ Saved RAW Bayer as 16-bit PNG: %s (size: %d bytes)", 
+                                   png_path, os.path.getsize(png_path) if os.path.exists(png_path) else 0)
                     else:
-                        logger.warning("tifffile library not installed, falling back to numpy .npy format")
-                        alt = dng_path.replace('.tiff', '.npy') if dng_path.endswith('.tiff') else dng_path + '.npy'
-                        np.save(alt, bayer)
-                        dng_saved_path = alt
+                        logger.error("Neither tifffile nor cv2 available, cannot save RAW data to image file")
+                        # Fall back to numpy array
+                        npy_path = dng_path.replace('.tiff', '.npy') if dng_path.endswith('.tiff') else dng_path + '.npy'
+                        np.save(npy_path, bayer)
+                        dng_saved_path = npy_path
                         logger.warning("Saved raw array as .npy: %s (size: %d bytes)", 
-                                     alt, os.path.getsize(alt) if os.path.exists(alt) else 0)
+                                     npy_path, os.path.getsize(npy_path) if os.path.exists(npy_path) else 0)
                 except Exception as e:
                     logger.error("Failed to save raw data to disk: %s", e, exc_info=True)
             else:

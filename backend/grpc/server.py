@@ -111,10 +111,11 @@ class ScannerServiceImpl:
                 self.logger.debug("Current camera mode: %s", self.controller.camera.mode)
                 
                 # Generate path in output directory (same as RGB captures)
+                # Use .tiff extension (will be converted to .png if tifffile not available)
                 self.controller.output_dir.mkdir(parents=True, exist_ok=True)
                 ts = int(time.time() * 1000)
                 raw_path = self.controller.output_dir / f"capture_raw_{ts}.tiff"
-                self.logger.info(f"RAW will be saved to: {raw_path}")
+                self.logger.info(f"RAW will be saved to: {raw_path} (or .png if tifffile not available)")
                 
                 result = self.controller.camera.capture_raw(save_dng=True, dng_path=str(raw_path))
                 
@@ -125,6 +126,11 @@ class ScannerServiceImpl:
                 
                 if result['dng_path'] is None:
                     self.logger.error("RAW capture failed: dng_path is None")
+                    # Check if raw_arr was captured but save failed
+                    if result.get('bayer') is not None:
+                        self.logger.error("Bayer data was captured but file save failed")
+                    else:
+                        self.logger.error("Camera capture itself failed, no raw data available")
                     return False, "", "RAW capture failed - no file saved"
                 
                 self.logger.info(f"✓ RAW frame captured successfully: {result['dng_path']}")
