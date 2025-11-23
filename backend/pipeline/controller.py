@@ -4,7 +4,7 @@ import cv2
 
 from backend.fsm import ScannerFSM
 from backend.camera import IMX477Camera
-from backend.motor import StepperMotor
+from backend.motor import Stepper28BYJ48
 from backend.pipeline.crop import Cropper
 from backend.pipeline.stitcher import Stitcher
 from backend.pipeline.evaluator import CaptureEvaluator
@@ -42,7 +42,7 @@ class PipelineController:
 
         # --- Core components ---
         self.camera = IMX477Camera(resolution=camera_config.get('resolution', (4056, 3040)) if camera_config else (4056, 3040))
-        self.motor = StepperMotor(**(motor_pins or {}))
+        self.motor = Stepper28BYJ48(**(motor_pins or {}))
         self.cropper = Cropper()  # No config required, has default
         self.stitcher = Stitcher()
         self.evaluator = CaptureEvaluator()

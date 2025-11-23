@@ -1,3 +1,3 @@
-from .stepper import StepperMotor
+from .stepper import Stepper28BYJ48
 
-__all__ = ["StepperMotor"]
+__all__ = ["Stepper28BYJ48"]

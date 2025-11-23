@@ -330,13 +330,18 @@ if __name__ == "__main__":
     parser.add_argument('--host', default='[::]', help='Server host (default: [::])')
     parser.add_argument('--port', type=int, default=50051, help='Server port (default: 50051)')
     parser.add_argument('--output-dir', default='./output', help='Output directory for scans')
+    parser.add_argument('--motor-pins', default='17,18,27,22', 
+                        help='Motor GPIO pins IN1-IN4 (default: 17,18,27,22)')
+    parser.add_argument('--motor-delay', type=float, default=0.002,
+                        help='Delay between motor steps in seconds (default: 0.002)')
     
     args = parser.parse_args()
     
+    # Parse motor pins
+    motor_pins = tuple(map(int, args.motor_pins.split(',')))
+    
     # Import required modules
     try:
-        from backend.camera.imx477 import IMX477Camera
-        from backend.motor.stepper import StepperMotor
         from backend.pipeline.controller import PipelineController
     except ImportError as e:
         logger.error(f"Failed to import required modules: {e}")
@@ -350,24 +355,24 @@ if __name__ == "__main__":
     logger.info("Initializing scanner components...")
     
     try:
-        # Initialize camera
-        camera = IMX477Camera(resolution=(4056, 3040))
-        logger.info("✓ Camera initialized")
+        # Prepare motor configuration
+        motor_config = {
+            'pins': motor_pins,
+            'delay': args.motor_delay
+        }
         
-        # Initialize motor
-        motor = StepperMotor(
-            step_pin=17,
-            dir_pin=27,
-            enable_pin=22,
-            steps_per_revolution=200
-        )
-        logger.info("✓ Motor initialized")
+        # Prepare camera configuration
+        camera_config = {
+            'resolution': (4056, 3040)
+        }
         
-        # Initialize pipeline controller
+        # Initialize pipeline controller (it creates camera and motor internally)
         controller = PipelineController(
-            camera=camera,
-            motor=motor,
-            output_dir=output_dir
+            output_dir=str(output_dir),
+            camera_config=camera_config,
+            motor_pins=motor_config,
+            max_frames=100,
+            detect_film_end=True
         )
         logger.info("✓ Pipeline controller initialized")
         
