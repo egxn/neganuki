@@ -28,6 +28,9 @@ service ScannerService {
 
   // Stream live preview (only available in idle state)
   rpc StreamPreview (PreviewRequest) returns (stream PreviewFrame);
+
+  // Manual motor control
+  rpc MoveMotor (MotorMoveRequest) returns (BasicResponse);
 }
 
 // --- Requests & Responses ---
@@ -81,4 +84,8 @@ message PreviewFrame {
   int32 width = 2;
   int32 height = 3;
   int64 timestamp = 4;  // Unix timestamp in milliseconds
+}
+
+message MotorMoveRequest {
+  int32 steps = 1;  // Number of steps to move (positive = forward, negative = backward)
 }

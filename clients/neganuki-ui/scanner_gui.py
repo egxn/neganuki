@@ -162,9 +162,36 @@ class ScannerGUI:
         )
         self.capture_raw_btn.grid(row=1, column=0, sticky="ew", pady=2)
         
+        # Motor controls
+        motor_frame = ttk.LabelFrame(control_frame, text="Manual Motor Control", padding=10)
+        motor_frame.grid(row=2, column=0, sticky="ew", pady=5)
+        motor_frame.grid_columnconfigure(0, weight=1)
+        motor_frame.grid_columnconfigure(1, weight=1)
+        
+        # Steps input
+        steps_subframe = ttk.Frame(motor_frame)
+        steps_subframe.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        ttk.Label(steps_subframe, text="Steps:").pack(side="left", padx=(0, 5))
+        self.motor_steps_var = tk.StringVar(value="100")
+        steps_spinbox = ttk.Spinbox(
+            steps_subframe, from_=1, to=5000, textvariable=self.motor_steps_var, width=10
+        )
+        steps_spinbox.pack(side="left", fill="x", expand=True)
+        
+        # Forward/Backward buttons
+        self.motor_forward_btn = ttk.Button(
+            motor_frame, text="⬆ Forward", command=self.move_motor_forward
+        )
+        self.motor_forward_btn.grid(row=1, column=0, sticky="ew", padx=(0, 2), pady=2)
+        
+        self.motor_backward_btn = ttk.Button(
+            motor_frame, text="⬇ Backward", command=self.move_motor_backward
+        )
+        self.motor_backward_btn.grid(row=1, column=1, sticky="ew", padx=(2, 0), pady=2)
+        
         # Status controls
         status_frame = ttk.LabelFrame(control_frame, text="Status", padding=10)
-        status_frame.grid(row=2, column=0, sticky="ew", pady=5)
+        status_frame.grid(row=3, column=0, sticky="ew", pady=5)
         status_frame.grid_columnconfigure(0, weight=1)
         
         self.refresh_btn = ttk.Button(
@@ -189,7 +216,7 @@ class ScannerGUI:
         
         # System controls
         system_frame = ttk.LabelFrame(control_frame, text="System", padding=10)
-        system_frame.grid(row=3, column=0, sticky="ew", pady=5)
+        system_frame.grid(row=4, column=0, sticky="ew", pady=5)
         system_frame.grid_columnconfigure(0, weight=1)
         
         self.shutdown_btn = ttk.Button(
@@ -198,7 +225,7 @@ class ScannerGUI:
         self.shutdown_btn.grid(row=0, column=0, sticky="ew", pady=2)
         
         # Spacer to push everything to top
-        control_frame.grid_rowconfigure(4, weight=1)
+        control_frame.grid_rowconfigure(5, weight=1)
     
     def _create_preview_panel(self, parent):
         """Create the preview and status panel."""
@@ -481,6 +508,66 @@ class ScannerGUI:
         except Exception as e:
             self.log_status(f"✗ Error: {e}", "error")
             messagebox.showerror("Capture Error", f"Failed to capture RAW frame:\n{e}")
+    
+    # ========== Motor Control Methods ==========
+    
+    def move_motor_forward(self):
+        """Move motor forward by specified steps."""
+        if not self.connected:
+            messagebox.showwarning("Not Connected", "Please connect to the scanner first")
+            return
+        
+        try:
+            steps = int(self.motor_steps_var.get())
+            if steps <= 0:
+                messagebox.showwarning("Invalid Steps", "Steps must be a positive number")
+                return
+            
+            self.log_status(f"Moving motor forward {steps} steps...", "info")
+            response = self.stub.MoveMotor(
+                scanner_pb2.MotorMoveRequest(steps=steps)
+            )
+            
+            if response.success:
+                self.log_status(f"✓ {response.message}", "success")
+            else:
+                self.log_status(f"✗ {response.message}", "error")
+                messagebox.showwarning("Motor Error", response.message)
+        
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please enter a valid number for steps")
+        except Exception as e:
+            self.log_status(f"✗ Error: {e}", "error")
+            messagebox.showerror("Motor Error", f"Failed to move motor:\n{e}")
+    
+    def move_motor_backward(self):
+        """Move motor backward by specified steps."""
+        if not self.connected:
+            messagebox.showwarning("Not Connected", "Please connect to the scanner first")
+            return
+        
+        try:
+            steps = int(self.motor_steps_var.get())
+            if steps <= 0:
+                messagebox.showwarning("Invalid Steps", "Steps must be a positive number")
+                return
+            
+            self.log_status(f"Moving motor backward {steps} steps...", "info")
+            response = self.stub.MoveMotor(
+                scanner_pb2.MotorMoveRequest(steps=-steps)  # Negative for backward
+            )
+            
+            if response.success:
+                self.log_status(f"✓ {response.message}", "success")
+            else:
+                self.log_status(f"✗ {response.message}", "error")
+                messagebox.showwarning("Motor Error", response.message)
+        
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please enter a valid number for steps")
+        except Exception as e:
+            self.log_status(f"✗ Error: {e}", "error")
+            messagebox.showerror("Motor Error", f"Failed to move motor:\n{e}")
     
     # ========== Status Methods ==========
     

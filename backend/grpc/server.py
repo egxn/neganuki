@@ -215,6 +215,40 @@ class ScannerServiceImpl:
             self.logger.error(f"StreamPreview error: {e}")
             return
 
+    def MoveMotor(self, request):
+        """
+        Move the motor manually by a specified number of steps.
+        Positive steps = forward, negative steps = backward.
+        Only works when scanner is in idle state.
+        """
+        try:
+            steps = request.steps
+            
+            # Check if scanner is idle
+            current_state = self.controller.current_state()
+            if current_state != 'idle':
+                return False, f"Cannot move motor in state: {current_state}. Must be in idle state."
+            
+            if steps == 0:
+                return False, "Steps cannot be zero"
+            
+            direction = "forward" if steps > 0 else "backward"
+            abs_steps = abs(steps)
+            
+            self.logger.info(f"MoveMotor called: {abs_steps} steps {direction}")
+            
+            # Move the motor
+            if steps > 0:
+                self.controller.motor.forward(abs_steps)
+            else:
+                self.controller.motor.backward(abs_steps)
+            
+            return True, f"Motor moved {abs_steps} steps {direction}"
+            
+        except Exception as e:
+            self.logger.error(f"MoveMotor failed: {e}")
+            return False, f"Motor move failed: {e}"
+
 
 # If generated gRPC classes exist, map them to service implementation
 if scanner_pb2 is not None and scanner_pb2_grpc is not None:
@@ -296,6 +330,10 @@ if scanner_pb2 is not None and scanner_pb2_grpc is not None:
                     except Exception as e:
                         logger.error(f"StreamPreview gRPC error: {e}")
                         return
+
+                def MoveMotor(inner_self, request, context):
+                    ok, msg = self._impl.MoveMotor(request)
+                    return scanner_pb2.BasicResponse(success=ok, message=msg)
 
             scanner_pb2_grpc.add_ScannerServiceServicer_to_server(Servicer(), self.server)
             self.server.add_insecure_port(f"{self.host}:{self.port}")
