@@ -233,21 +233,27 @@ class IMX477Camera:
             raise RuntimeError("Picamera2 not available")
 
         restore_mode = None
+        reconfigured = False
+        
         if self.mode in ("preview", "dual"):
             restore_mode = self.mode
-            logger.info("Current mode is '%s', switching to raw mode for capture", self.mode)
+            logger.info("Current mode is '%s', attempting to switch to raw mode for capture", self.mode)
             try:
                 self.reconfigure("raw")
+                reconfigured = True
                 logger.info("Successfully reconfigured camera to raw mode")
             except Exception as e:
-                logger.error("Failed to configure RAW mode: %s", e)
-                return {"bayer": None, "meta": None, "dng_path": None}
+                logger.error("Failed to reconfigure to RAW mode: %s", e, exc_info=True)
+                logger.warning("Will attempt capture in current mode instead")
+                # Don't return error yet, try to capture anyway
         else:
             logger.info("Camera already in raw mode, proceeding with capture")
 
         # Capture data and metadata in one go
         raw_arr = None
         meta = None
+        capture_success = False
+        
         try:
             logger.debug("Capturing raw request from camera...")
             request = self.picam.capture_request()
@@ -257,11 +263,38 @@ class IMX477Camera:
             meta = request.get_metadata()
             logger.debug("Releasing capture request...")
             request.release()
-            logger.info("Raw capture successful: array shape=%s, dtype=%s", 
-                       raw_arr.shape if raw_arr is not None else "None", 
-                       raw_arr.dtype if raw_arr is not None else "None")
+            
+            if raw_arr is not None:
+                logger.info("Raw capture successful: array shape=%s, dtype=%s", 
+                           raw_arr.shape, raw_arr.dtype)
+                capture_success = True
+            else:
+                logger.warning("capture_request succeeded but array is None")
+                
         except Exception as e:
             logger.error("Raw capture failed during capture_request: %s", e, exc_info=True)
+            
+            # If we reconfigured and capture failed, try to restore and capture as high-quality RGB
+            if reconfigured and restore_mode is not None:
+                logger.info("Capture failed after reconfigure, restoring to %s mode and trying RGB capture", restore_mode)
+                try:
+                    self.reconfigure(restore_mode)
+                    logger.info("Attempting high-quality RGB capture as fallback...")
+                    
+                    # Try to capture a regular frame as fallback
+                    request = self.picam.capture_request()
+                    raw_arr = request.make_array()
+                    meta = request.get_metadata()
+                    request.release()
+                    
+                    if raw_arr is not None:
+                        logger.warning("RAW capture failed but RGB fallback succeeded: shape=%s, dtype=%s", 
+                                     raw_arr.shape, raw_arr.dtype)
+                        capture_success = True
+                        reconfigured = False  # Already restored
+                    
+                except Exception as restore_error:
+                    logger.error("Failed to restore camera mode and capture RGB fallback: %s", restore_error, exc_info=True)
 
         dng_saved_path = None
         if raw_arr is not None:
@@ -316,10 +349,11 @@ class IMX477Camera:
                        list(meta.keys()) if meta else "None",
                        dng_saved_path)
         else:
-            logger.warning("Raw array is None, capture may have failed")
+            logger.warning("Raw array is None, capture failed")
             result = {"bayer": None, "meta": meta, "dng_path": None}
 
-        if restore_mode is not None:
+        # Restore original mode if we reconfigured successfully
+        if reconfigured and restore_mode is not None:
             logger.info("Restoring camera to previous mode: %s", restore_mode)
             try:
                 self.reconfigure(restore_mode)
