@@ -314,3 +314,69 @@ def run_server(controller: PipelineController, host: str = "[::]", port: int = 5
             time.sleep(1)
     except KeyboardInterrupt:
         server.stop(0)
+
+
+if __name__ == "__main__":
+    import argparse
+    from pathlib import Path
+    
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    parser = argparse.ArgumentParser(description='Film Scanner gRPC Server')
+    parser.add_argument('--host', default='[::]', help='Server host (default: [::])')
+    parser.add_argument('--port', type=int, default=50051, help='Server port (default: 50051)')
+    parser.add_argument('--output-dir', default='./output', help='Output directory for scans')
+    
+    args = parser.parse_args()
+    
+    # Import required modules
+    try:
+        from backend.camera.imx477 import IMX477Camera
+        from backend.motor.stepper import StepperMotor
+        from backend.pipeline.controller import PipelineController
+    except ImportError as e:
+        logger.error(f"Failed to import required modules: {e}")
+        logger.error("Make sure you have generated the protobuf files: poetry run generate-protos")
+        exit(1)
+    
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    logger.info("Initializing scanner components...")
+    
+    try:
+        # Initialize camera
+        camera = IMX477Camera(resolution=(4056, 3040))
+        logger.info("✓ Camera initialized")
+        
+        # Initialize motor
+        motor = StepperMotor(
+            step_pin=17,
+            dir_pin=27,
+            enable_pin=22,
+            steps_per_revolution=200
+        )
+        logger.info("✓ Motor initialized")
+        
+        # Initialize pipeline controller
+        controller = PipelineController(
+            camera=camera,
+            motor=motor,
+            output_dir=output_dir
+        )
+        logger.info("✓ Pipeline controller initialized")
+        
+        # Start gRPC server
+        logger.info(f"Starting gRPC server on {args.host}:{args.port}")
+        run_server(controller, host=args.host, port=args.port)
+        
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        import traceback
+        traceback.print_exc()
+        exit(1)
