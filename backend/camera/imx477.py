@@ -75,38 +75,76 @@ class IMX477Camera:
     def _create_raw_config(self):
         """Create a RAW (Bayer) configuration.
 
-        NOTE: exact format string can vary depending on Picamera2 / libcamera.
-        Common names include 'SENSOR_FORMAT' variants or 'BAYER' strings. If the
-        default below does not work on your Pi, please check the Picamera2 docs
-        and replace the format string with the one supported by your setup.
+        Uses Picamera2's sensor_modes to find available RAW formats.
+        IMX477 typically supports 12-bit RAW formats.
         """
         if not Picamera2:
             raise RuntimeError("Picamera2 not available")
 
-        # Try a commonly used raw Bayer format. If your system uses another
-        # name for the format (S_BAYER_BGGR10 / SBGGR10 / ...) you should
-        # replace it accordingly.
-        # We keep this value configurable by changing this function if needed.
+        try:
+            # Get available sensor modes to find RAW formats
+            sensor_modes = self.picam.sensor_modes
+            logger.info(f"Available sensor modes: {len(sensor_modes)}")
+            
+            # Look for RAW mode - typically the first mode is full resolution RAW
+            raw_mode = None
+            for mode in sensor_modes:
+                logger.debug(f"Sensor mode: {mode}")
+                # IMX477 RAW modes typically have format like 'SRGGB10' or 'SRGGB12'
+                if 'format' in mode and any(x in str(mode.get('format', '')) for x in ['SRGGB', 'SBGGR', 'SGRBG', 'SGBRG', 'RGGB', 'BGGR']):
+                    raw_mode = mode
+                    logger.info(f"Found RAW mode: {mode}")
+                    break
+            
+            if raw_mode:
+                # Create configuration using the sensor's native RAW mode
+                cfg = self.picam.create_still_configuration(
+                    raw={"size": self.resolution},
+                    display=None,
+                    encode=None,
+                )
+                logger.info(f"Created RAW configuration with native sensor mode")
+                return cfg
+                
+        except Exception as e:
+            logger.warning(f"Failed to create RAW config using sensor modes: {e}")
+
+        # Fallback: Try common RAW format strings
         raw_format_candidates = [
-            "SBGGR16",  # 16-bit Bayer (may not be available on all systems)
-            "SGBRG10",  # examples of alternatives
-            "S_RGGB10",
+            "SRGGB12",  # IMX477 native 12-bit RAW
+            "SRGGB10",  # 10-bit alternative
+            "SBGGR12",
             "SBGGR10",
-            "BAYER_RGGB8",
+            "SGBRG12",
+            "SGBRG10",
         ]
 
         for fmt in raw_format_candidates:
             try:
+                logger.debug(f"Trying RAW format: {fmt}")
                 cfg = self.picam.create_still_configuration(
-                    main={"size": self.resolution, "format": fmt}
+                    raw={"size": self.resolution, "format": fmt},
+                    display=None,
                 )
-                # test if configuration is OK by returning it
+                logger.info(f"Successfully created RAW config with format: {fmt}")
                 return cfg
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Format {fmt} not available: {e}")
                 continue
 
-        # If none succeeded, fallback to a generic configuration and warn.
-        logger.warning("No standard RAW format candidate succeeded. Falling back to RGB preview config.")
+        # Last resort: use raw without specifying format (let Picamera2 choose)
+        try:
+            cfg = self.picam.create_still_configuration(
+                raw={"size": self.resolution},
+                display=None,
+            )
+            logger.info("Created RAW configuration with auto-format")
+            return cfg
+        except Exception as e:
+            logger.warning(f"Failed to create any RAW configuration: {e}")
+
+        # If all else fails, fallback to RGB preview config
+        logger.warning("No RAW format available. Falling back to RGB preview config.")
         return self._create_preview_config()
 
     def reconfigure(self, mode: str):
@@ -122,27 +160,45 @@ class IMX477Camera:
         if not self.picam:
             raise RuntimeError("Picamera2 not available on this system")
 
+        logger.info(f"Reconfiguring camera from '{self.mode}' to '{mode}'")
+
         # stop safely
         try:
+            logger.debug("Stopping camera...")
             self.picam.stop()
-        except Exception:
-            pass
+            logger.debug("Camera stopped successfully")
+        except Exception as e:
+            logger.debug(f"Camera stop returned: {e} (may already be stopped)")
 
-        self.mode = mode
-        # self.picam is already initialized in __init__
-
+        # Create configuration for requested mode
         if mode == "preview" or mode == "dual":
+            logger.debug("Creating preview configuration...")
             self._current_config = self._create_preview_config()
         elif mode == "raw":
+            logger.debug("Creating RAW configuration...")
             self._current_config = self._create_raw_config()
-            if self._current_config["main"]["format"] == "RGB888":
-                logger.warning("RAW configuration failed, falling back to RGB preview config internally.")
+            
+            # Check if we actually got a RAW config or fallback
+            config_format = self._current_config.get("main", {}).get("format", "")
+            if "RGB" in config_format:
+                logger.warning("RAW configuration unavailable, using RGB fallback")
+                raise RuntimeError(f"RAW mode not available on this system (got {config_format} instead)")
+            else:
+                logger.info(f"RAW configuration created with format: {config_format}")
         else:
             raise ValueError("Unknown mode: %s" % mode)
 
         # configure and start
-        self.picam.configure(self._current_config)
-        self.picam.start()
+        try:
+            logger.debug(f"Applying configuration: {self._current_config}")
+            self.picam.configure(self._current_config)
+            logger.debug("Configuration applied, starting camera...")
+            self.picam.start()
+            logger.info(f"Camera started successfully in '{mode}' mode")
+            self.mode = mode
+        except Exception as e:
+            logger.error(f"Failed to configure and start camera: {e}", exc_info=True)
+            raise
 
     # -------------------- Public API --------------------
 
