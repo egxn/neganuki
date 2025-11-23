@@ -9,7 +9,13 @@ Ideal for automation or simple scanning tasks.
 
 import sys
 from pathlib import Path
-from scanner_client import ScannerClient
+
+# Import scanner_client from same directory
+try:
+    from scanner_client import ScannerClient
+except ImportError:
+    # Try absolute import if running as package
+    from clients.neganuki_terminal.scanner_client import ScannerClient
 
 
 def quick_scan(host='localhost', port=50051):
