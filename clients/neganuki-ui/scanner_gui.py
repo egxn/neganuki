@@ -340,6 +340,12 @@ class ScannerGUI:
             if self.monitor_var.get():
                 self.start_monitoring()
             
+            # Auto-start live preview on connection
+            if not self.preview_streaming:
+                self.preview_stream_var.set(True)
+                self.start_preview_stream()
+                self.log_status("✓ Live preview started automatically", "info")
+            
         except Exception as e:
             self.log_status(f"✗ Connection failed: {e}", "error")
             messagebox.showerror("Connection Error", f"Could not connect to scanner:\n{e}")

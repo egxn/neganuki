@@ -47,6 +47,13 @@ class PipelineController:
         self.stitcher = Stitcher()
         self.evaluator = CaptureEvaluator()
 
+        # Initialize camera in preview mode for live preview availability
+        try:
+            self.camera.initialize(mode="preview")
+            self.log.info("Camera initialized in preview mode for live preview")
+        except Exception as e:
+            self.log.warning(f"Camera initialization failed: {e}. Preview may not be available.")
+
         # --- Storage ---
         self.frames = []
         self.current_stitched = None
@@ -86,10 +93,15 @@ class PipelineController:
     def _on_enter_initializing(self):
         self.log.info("Initializing scanner...")
         
-        # Initialize camera
+        # Camera already initialized in __init__ for live preview availability
+        # Just verify it's ready
         try:
-            self.camera.initialize(mode="preview")
-            self.log.info("Camera initialized successfully")
+            if not self.camera.picam:
+                # If for some reason camera wasn't initialized, do it now
+                self.camera.initialize(mode="preview")
+                self.log.info("Camera initialized successfully")
+            else:
+                self.log.info("Camera already initialized and ready")
         except Exception as e:
             self.log.error(f"Camera initialization failed: {e}")
             self.fsm.fail()
