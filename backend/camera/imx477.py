@@ -17,7 +17,7 @@ Notes:
 Dependencies (optional): rawpy, tifffile
 """
 
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
 import tempfile
 import os
 import numpy as np
@@ -35,6 +35,11 @@ try:
 except Exception as e:
     Picamera2 = None
 
+if TYPE_CHECKING:
+    from picamera2 import Picamera2 as Picamera2Type
+else:
+    Picamera2Type = Any
+
 # Optional libs
 try:
     import rawpy
@@ -47,10 +52,25 @@ except Exception:
     tifffile = None
 
 
+DEFAULT_MANUAL_CONTROLS: Dict[str, Any] = {
+    "AeEnable": False,
+    "ExposureTime": 10000,
+    "AnalogueGain": 1.0,
+    "AwbEnable": False,
+    "ColourGains": (1.2, 1.1),
+    "GainEnable": False,
+    "Brightness": 0.0,
+    "Contrast": 1.0,
+    "Sharpness": 0.0,
+    "Saturation": 1.0,
+    "DrcStrength": 0,
+}
+
+
 class IMX477Camera:
     def __init__(self, resolution: Tuple[int, int] = (4056, 3040)):
         self.resolution = resolution
-        self.picam: Optional[Picamera2] = None
+        self.picam: Optional[Picamera2Type] = None
         self.mode = "preview"  # preview | raw | dual
         self._current_config = None
 
@@ -196,6 +216,8 @@ class IMX477Camera:
             self.picam.start()
             logger.info(f"Camera started successfully in '{mode}' mode")
             self.mode = mode
+            # Apply manual controls after the camera has started
+            self.apply_manual_controls()
         except Exception as e:
             logger.error(f"Failed to configure and start camera: {e}", exc_info=True)
             raise
@@ -227,10 +249,31 @@ class IMX477Camera:
         """Set exposure time (microseconds) and optional analogue gain."""
         if not self.picam:
             raise RuntimeError("Camera not initialized")
-        controls = {"ExposureTime": exposure_us}
+        controls = {"AeEnable": False, "ExposureTime": exposure_us}
         if analogue_gain is not None:
             controls["AnalogueGain"] = analogue_gain
         self.picam.set_controls(controls)
+        logger.debug("Manual exposure controls applied: %s", controls)
+
+    def apply_manual_controls(self, overrides: Optional[Dict[str, Any]] = None) -> None:
+        """Apply fixed manual controls for consistent capture settings.
+
+        Parameters follow Picamera2 control names. Any overrides provided will
+        update the defaults prior to applying them.
+        """
+        if not self.picam:
+            logger.debug("apply_manual_controls called before camera initialization")
+            return
+
+        controls: Dict[str, Any] = dict(DEFAULT_MANUAL_CONTROLS)
+        if overrides:
+            controls.update(overrides)
+
+        try:
+            self.picam.set_controls(controls)
+            logger.info("Manual controls applied to Picamera2 instance: %s", controls)
+        except Exception as exc:
+            logger.warning("Failed to apply manual controls: %s", exc)
 
     def capture_frame(self) -> np.ndarray:
         """Capture an RGB frame (NumPy array)."""
