@@ -162,6 +162,11 @@ class ScannerGUI:
         )
         self.capture_raw_btn.grid(row=1, column=0, sticky="ew", pady=2)
         
+        self.calc_wb_btn = ttk.Button(
+            capture_frame, text="⚖ Calculate White Balance", command=self.calculate_white_balance
+        )
+        self.calc_wb_btn.grid(row=2, column=0, sticky="ew", pady=2)
+        
         # Motor controls
         motor_frame = ttk.LabelFrame(control_frame, text="Manual Motor Control", padding=10)
         motor_frame.grid(row=2, column=0, sticky="ew", pady=5)
@@ -514,6 +519,28 @@ class ScannerGUI:
         except Exception as e:
             self.log_status(f"✗ Error: {e}", "error")
             messagebox.showerror("Capture Error", f"Failed to capture RAW frame:\n{e}")
+    
+    def calculate_white_balance(self):
+        """Calculate colour gains for white balance calibration."""
+        if not self.connected:
+            messagebox.showwarning("Not Connected", "Please connect to the scanner first")
+            return
+        
+        try:
+            self.log_status("Calculating white balance gains...", "info")
+            response = self.stub.CalculateColourGains(scanner_pb2.Empty())
+            
+            if response.success:
+                self.log_status(
+                    f"✓ Colour gains: R={response.r_gain:.3f}, B={response.b_gain:.3f}", 
+                    "success"
+                )
+            else:
+                self.log_status(f"✗ {response.message}", "error")
+        
+        except Exception as e:
+            self.log_status(f"✗ Error: {e}", "error")
+            messagebox.showerror("White Balance Error", f"Failed to calculate colour gains:\n{e}")
     
     # ========== Motor Control Methods ==========
     

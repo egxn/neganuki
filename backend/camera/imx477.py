@@ -257,6 +257,77 @@ class IMX477Camera:
         self.picam.set_controls(controls)
         logger.debug("Manual exposure controls applied: %s", controls)
 
+    def calculate_colour_gains(self, output_path: Optional[str] = None) -> Tuple[float, float]:
+        """Capture a RAW frame, analyze Bayer pattern, and compute white balance gains.
+
+        Returns (R_gain, B_gain) tuple suitable for ColourGains control.
+        
+        Steps:
+        1. Capture RAW Bayer as TIFF
+        2. Load with rawpy to access raw_image
+        3. Extract RGGB channels from Bayer pattern (assuming RGGB layout)
+        4. Compute mean per channel
+        5. Calculate gains relative to green: R_gain = mean_G / mean_R, B_gain = mean_G / mean_B
+        """
+        if not rawpy:
+            raise RuntimeError("rawpy library required for colour gain calculation")
+
+        if not self.picam:
+            raise RuntimeError("Camera not initialized")
+
+        # Capture RAW to temporary location or user-specified path
+        if output_path is None:
+            output_path = os.path.join(tempfile.gettempdir(), "colour_gain_sample.tiff")
+
+        logger.info("Capturing RAW frame for colour gain calculation...")
+        result = self.capture_raw(save_dng=True, dng_path=output_path)
+        
+        if not result.get("dng_path"):
+            raise RuntimeError("Failed to save RAW capture for colour gain calculation")
+
+        raw_path = result["dng_path"]
+        logger.debug(f"Loading RAW data from {raw_path} with rawpy...")
+
+        # Load RAW with rawpy (works with TIFF if it contains Bayer data)
+        # Note: rawpy expects DNG/RAW formats; if TIFF doesn't work, capture_raw would need to save DNG
+        try:
+            with rawpy.imread(raw_path) as raw:
+                sensor_data = raw.raw_image.copy()  # 2D Bayer array
+                logger.debug(f"Raw sensor data shape: {sensor_data.shape}, dtype: {sensor_data.dtype}")
+        except Exception as e:
+            logger.error(f"rawpy failed to load {raw_path}: {e}")
+            raise RuntimeError(f"Could not parse RAW data with rawpy: {e}") from e
+
+        # Extract RGGB channels assuming standard Bayer pattern (R at 0,0; G at 0,1 and 1,0; B at 1,1)
+        R = sensor_data[0::2, 0::2].astype(np.float64)
+        G1 = sensor_data[0::2, 1::2].astype(np.float64)
+        G2 = sensor_data[1::2, 0::2].astype(np.float64)
+        B = sensor_data[1::2, 1::2].astype(np.float64)
+
+        # Combine the two green channels
+        G = (G1 + G2) / 2.0
+
+        # Compute means
+        mean_R = R.mean()
+        mean_G = G.mean()
+        mean_B = B.mean()
+
+        logger.debug(f"Channel means: R={mean_R:.2f}, G={mean_G:.2f}, B={mean_B:.2f}")
+
+        if mean_R == 0 or mean_B == 0:
+            raise RuntimeError("Zero mean detected in R or B channel; cannot compute gains")
+
+        # Calculate gains relative to green
+        R_gain = mean_G / mean_R
+        B_gain = mean_G / mean_B
+
+        # Round to 3 decimals
+        R_gain = round(R_gain, 3)
+        B_gain = round(B_gain, 3)
+
+        logger.info(f"Computed ColourGains: R_gain={R_gain}, B_gain={B_gain}")
+        return (R_gain, B_gain)
+
     def apply_manual_controls(self, overrides: Optional[Dict[str, Any]] = None) -> None:
         """Apply fixed manual controls for consistent capture settings.
 

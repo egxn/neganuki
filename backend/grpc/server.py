@@ -281,6 +281,29 @@ class ScannerServiceImpl:
         except Exception as e:
             self.logger.error(f"MoveMotor failed: {e}")
             return False, f"Motor move failed: {e}"
+    
+    def CalculateColourGains(self, request):
+        """
+        Calculate white balance colour gains from a RAW capture.
+        Returns R and B gains relative to G.
+        """
+        try:
+            self.logger.info("CalculateColourGains called")
+            
+            # Check if scanner is idle
+            current_state = self.controller.current_state()
+            if current_state != 'idle':
+                return False, f"Cannot calculate gains in state: {current_state}. Must be in idle state.", 0.0, 0.0
+            
+            # Call camera's calculate_colour_gains method
+            r_gain, b_gain = self.controller.camera.calculate_colour_gains()
+            
+            self.logger.info(f"✓ Colour gains calculated: R={r_gain:.3f}, B={b_gain:.3f}")
+            return True, f"Gains calculated: R={r_gain:.3f}, B={b_gain:.3f}", r_gain, b_gain
+            
+        except Exception as e:
+            self.logger.error(f"CalculateColourGains failed: {e}")
+            return False, f"Calculation failed: {e}", 0.0, 0.0
 
 
 # If generated gRPC classes exist, map them to service implementation
@@ -367,6 +390,15 @@ if scanner_pb2 is not None and scanner_pb2_grpc is not None:
                 def MoveMotor(inner_self, request, context):
                     ok, msg = self._impl.MoveMotor(request)
                     return scanner_pb2.BasicResponse(success=ok, message=msg)
+                
+                def CalculateColourGains(inner_self, request, context):
+                    ok, msg, r_gain, b_gain = self._impl.CalculateColourGains(request)
+                    return scanner_pb2.ColourGainsResponse(
+                        success=ok, 
+                        message=msg, 
+                        r_gain=r_gain, 
+                        b_gain=b_gain
+                    )
 
             scanner_pb2_grpc.add_ScannerServiceServicer_to_server(Servicer(), self.server)
             self.server.add_insecure_port(f"{self.host}:{self.port}")

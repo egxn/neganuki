@@ -31,6 +31,9 @@ service ScannerService {
 
   // Manual motor control
   rpc MoveMotor (MotorMoveRequest) returns (BasicResponse);
+  
+  // Calculate white balance colour gains
+  rpc CalculateColourGains (Empty) returns (ColourGainsResponse);
 }
 
 // --- Requests & Responses ---
@@ -88,4 +91,13 @@ message PreviewFrame {
 
 message MotorMoveRequest {
   int32 steps = 1;  // Number of steps to move (positive = forward, negative = backward)
+}
+
+message Empty {}
+
+message ColourGainsResponse {
+  bool success = 1;
+  string message = 2;
+  float r_gain = 3;  // Red channel gain
+  float b_gain = 4;  // Blue channel gain
 }
