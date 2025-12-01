@@ -270,8 +270,40 @@ class IMX477Camera:
             controls.update(overrides)
 
         try:
-            self.picam.set_controls(controls)
-            logger.info("Manual controls applied to Picamera2 instance: %s", controls)
+            available: set[str] = set()
+            if hasattr(self.picam, "camera_controls"):
+                try:
+                    available = set(self.picam.camera_controls.keys())
+                except Exception:
+                    available = set()
+
+            unsupported = []
+            if available:
+                filtered_controls = {}
+                for key, value in controls.items():
+                    if key in available:
+                        filtered_controls[key] = value
+                    else:
+                        unsupported.append(key)
+                controls_to_apply = filtered_controls
+            else:
+                controls_to_apply = controls
+
+            if unsupported:
+                logger.warning(
+                    "Skipping unsupported controls for this pipeline: %s",
+                    ", ".join(sorted(unsupported)),
+                )
+
+            if not controls_to_apply:
+                logger.warning("No supported manual controls to apply on this pipeline")
+                return
+
+            self.picam.set_controls(controls_to_apply)
+            logger.info(
+                "Manual controls applied to Picamera2 instance: %s",
+                controls_to_apply,
+            )
         except Exception as exc:
             logger.warning("Failed to apply manual controls: %s", exc)
 
