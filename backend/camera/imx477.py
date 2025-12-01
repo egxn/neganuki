@@ -40,6 +40,11 @@ if TYPE_CHECKING:
 else:
     Picamera2Type = Any
 
+try:
+    import libcamera
+except Exception:
+    libcamera = None
+
 # Optional libs
 try:
     import rawpy
@@ -278,6 +283,10 @@ class IMX477Camera:
                     available = set()
 
             unsupported = []
+            manual_exposure_supported = bool(libcamera) and hasattr(
+                getattr(libcamera, "controls", object()), "ExposureTimeMode"
+            )
+
             if available:
                 filtered_controls = {}
                 for key, value in controls.items():
@@ -288,6 +297,12 @@ class IMX477Camera:
                 controls_to_apply = filtered_controls
             else:
                 controls_to_apply = controls
+
+            if not manual_exposure_supported:
+                for key in ("AeEnable", "ExposureTime"):
+                    if key in controls_to_apply:
+                        controls_to_apply.pop(key, None)
+                        unsupported.append(key)
 
             if unsupported:
                 logger.warning(
