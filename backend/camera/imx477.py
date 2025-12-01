@@ -61,7 +61,7 @@ DEFAULT_MANUAL_CONTROLS: Dict[str, Any] = {
     "AeEnable": False,
     "ExposureTime": 10000,
     "AwbEnable": False,
-    "ColourGains": (1.2, 1.1),
+    "ColourGains": (1.0, 1.0),
     "Brightness": 0.0,
     "Contrast": 1.0,
     "Sharpness": 0.0,
