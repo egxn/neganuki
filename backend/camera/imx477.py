@@ -60,15 +60,12 @@ except Exception:
 DEFAULT_MANUAL_CONTROLS: Dict[str, Any] = {
     "AeEnable": False,
     "ExposureTime": 10000,
-    "AnalogueGain": 1.0,
     "AwbEnable": False,
     "ColourGains": (1.2, 1.1),
-    "GainEnable": False,
     "Brightness": 0.0,
     "Contrast": 1.0,
     "Sharpness": 0.0,
     "Saturation": 1.0,
-    "DrcStrength": 0,
 }
 
 
@@ -286,6 +283,12 @@ class IMX477Camera:
             manual_exposure_supported = bool(libcamera) and hasattr(
                 getattr(libcamera, "controls", object()), "ExposureTimeMode"
             )
+            manual_gain_supported = bool(libcamera) and hasattr(
+                getattr(libcamera, "controls", object()), "AnalogueGainMode"
+            )
+            manual_awb_supported = bool(libcamera) and hasattr(
+                getattr(libcamera, "controls", object()), "AwbMode"
+            )
 
             if available:
                 filtered_controls = {}
@@ -302,7 +305,22 @@ class IMX477Camera:
                 for key in ("AeEnable", "ExposureTime"):
                     if key in controls_to_apply:
                         controls_to_apply.pop(key, None)
-                        unsupported.append(key)
+                        if key not in unsupported:
+                            unsupported.append(key)
+
+            if not manual_gain_supported:
+                for key in ("AnalogueGain", "GainEnable"):
+                    if key in controls_to_apply:
+                        controls_to_apply.pop(key, None)
+                        if key not in unsupported:
+                            unsupported.append(key)
+
+            if not manual_awb_supported:
+                for key in ("AwbEnable", "ColourGains"):
+                    if key in controls_to_apply:
+                        controls_to_apply.pop(key, None)
+                        if key not in unsupported:
+                            unsupported.append(key)
 
             if unsupported:
                 logger.warning(
