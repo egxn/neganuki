@@ -263,40 +263,25 @@ class IMX477Camera:
         Returns (R_gain, B_gain) tuple suitable for ColourGains control.
         
         Steps:
-        1. Capture RAW Bayer as TIFF
-        2. Load with rawpy to access raw_image
-        3. Extract RGGB channels from Bayer pattern (assuming RGGB layout)
-        4. Compute mean per channel
-        5. Calculate gains relative to green: R_gain = mean_G / mean_R, B_gain = mean_G / mean_B
+        1. Capture RAW Bayer array directly
+        2. Extract RGGB channels from Bayer pattern (assuming RGGB layout)
+        3. Compute mean per channel
+        4. Calculate gains relative to green: R_gain = mean_G / mean_R, B_gain = mean_G / mean_B
         """
-        if not rawpy:
-            raise RuntimeError("rawpy library required for colour gain calculation")
-
         if not self.picam:
             raise RuntimeError("Camera not initialized")
 
-        # Capture RAW to temporary location or user-specified path
-        if output_path is None:
-            output_path = os.path.join(tempfile.gettempdir(), "colour_gain_sample.tiff")
-
         logger.info("Capturing RAW frame for colour gain calculation...")
-        result = self.capture_raw(save_dng=True, dng_path=output_path)
         
-        if not result.get("dng_path"):
-            raise RuntimeError("Failed to save RAW capture for colour gain calculation")
+        # Capture RAW and optionally save for debugging
+        save_for_debug = output_path is not None
+        result = self.capture_raw(save_dng=save_for_debug, dng_path=output_path)
+        
+        if result.get("bayer") is None:
+            raise RuntimeError("Failed to capture RAW Bayer data")
 
-        raw_path = result["dng_path"]
-        logger.debug(f"Loading RAW data from {raw_path} with rawpy...")
-
-        # Load RAW with rawpy (works with TIFF if it contains Bayer data)
-        # Note: rawpy expects DNG/RAW formats; if TIFF doesn't work, capture_raw would need to save DNG
-        try:
-            with rawpy.imread(raw_path) as raw:
-                sensor_data = raw.raw_image.copy()  # 2D Bayer array
-                logger.debug(f"Raw sensor data shape: {sensor_data.shape}, dtype: {sensor_data.dtype}")
-        except Exception as e:
-            logger.error(f"rawpy failed to load {raw_path}: {e}")
-            raise RuntimeError(f"Could not parse RAW data with rawpy: {e}") from e
+        sensor_data = result["bayer"]
+        logger.debug(f"Raw sensor data shape: {sensor_data.shape}, dtype: {sensor_data.dtype}")
 
         # Extract RGGB channels assuming standard Bayer pattern (R at 0,0; G at 0,1 and 1,0; B at 1,1)
         R = sensor_data[0::2, 0::2].astype(np.float64)
