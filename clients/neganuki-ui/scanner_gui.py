@@ -122,30 +122,52 @@ class ScannerGUI:
         control_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         control_frame.grid_columnconfigure(0, weight=1)
         
-        # Scan controls
-        scan_frame = ttk.LabelFrame(control_frame, text="Scan Operations", padding=10)
-        scan_frame.grid(row=0, column=0, sticky="ew", pady=5)
-        scan_frame.grid_columnconfigure(0, weight=1)
+        # Camera preset controls (moved to top)
+        preset_frame = ttk.LabelFrame(control_frame, text="Camera Presets", padding=10)
+        preset_frame.grid(row=0, column=0, sticky="ew", pady=5)
+        preset_frame.grid_columnconfigure(0, weight=1)
         
-        self.start_btn = ttk.Button(
-            scan_frame, text="▶ Start Scan", command=self.start_scan, style="Accent.TButton"
-        )
-        self.start_btn.grid(row=0, column=0, sticky="ew", pady=2)
+        # Current preset display
+        current_preset_frame = ttk.Frame(preset_frame)
+        current_preset_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        ttk.Label(current_preset_frame, text="Current:").pack(side="left", padx=(0, 5))
+        self.current_preset_label = ttk.Label(current_preset_frame, text="default", 
+                                               font=("", 9, "bold"))
+        self.current_preset_label.pack(side="left")
         
-        self.pause_btn = ttk.Button(
-            scan_frame, text="⏸ Pause", command=self.pause_scan, state="disabled"
-        )
-        self.pause_btn.grid(row=1, column=0, sticky="ew", pady=2)
+        # Preset selector with apply button on same row
+        preset_selector_frame = ttk.Frame(preset_frame)
+        preset_selector_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5))
+        ttk.Label(preset_selector_frame, text="Select:").pack(side="left", padx=(0, 5))
+        self.preset_var = tk.StringVar(value="default")
+        self.selected_preset_id = "default"  # Store the actual preset ID separately
+        self.preset_combo = ttk.Combobox(preset_selector_frame, textvariable=self.preset_var,
+                                         state="readonly", width=10)
+        self.preset_combo["values"] = ["default"]
+        self.preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
+        self.preset_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
         
-        self.resume_btn = ttk.Button(
-            scan_frame, text="⏵ Resume", command=self.resume_scan, state="disabled"
+        # Apply button next to selector
+        self.apply_preset_btn = ttk.Button(
+            preset_selector_frame, text="Apply", command=self.apply_preset, width=8
         )
-        self.resume_btn.grid(row=2, column=0, sticky="ew", pady=2)
+        self.apply_preset_btn.pack(side="left")
         
-        self.stop_btn = ttk.Button(
-            scan_frame, text="⏹ Stop", command=self.stop_scan, state="disabled"
+        # Refresh and Create buttons
+        buttons_frame = ttk.Frame(preset_frame)
+        buttons_frame.grid(row=2, column=0, sticky="ew")
+        buttons_frame.grid_columnconfigure(0, weight=1)
+        buttons_frame.grid_columnconfigure(1, weight=1)
+        
+        self.refresh_presets_btn = ttk.Button(
+            buttons_frame, text="🔄 Refresh", command=self.refresh_presets
         )
-        self.stop_btn.grid(row=3, column=0, sticky="ew", pady=2)
+        self.refresh_presets_btn.grid(row=0, column=0, sticky="ew", padx=(0, 2), pady=2)
+        
+        self.create_preset_btn = ttk.Button(
+            buttons_frame, text="➕ Create", command=self.show_create_preset_dialog
+        )
+        self.create_preset_btn.grid(row=0, column=1, sticky="ew", padx=(2, 0), pady=2)
         
         # Capture controls
         capture_frame = ttk.LabelFrame(control_frame, text="Single Frame Capture", padding=10)
@@ -167,52 +189,9 @@ class ScannerGUI:
         )
         self.calc_wb_btn.grid(row=2, column=0, sticky="ew", pady=2)
         
-        # Camera preset controls
-        preset_frame = ttk.LabelFrame(control_frame, text="Camera Presets", padding=10)
-        preset_frame.grid(row=2, column=0, sticky="ew", pady=5)
-        preset_frame.grid_columnconfigure(0, weight=1)
-        
-        # Current preset display
-        current_preset_frame = ttk.Frame(preset_frame)
-        current_preset_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-        ttk.Label(current_preset_frame, text="Current:").pack(side="left", padx=(0, 5))
-        self.current_preset_label = ttk.Label(current_preset_frame, text="default", 
-                                               font=("", 9, "bold"))
-        self.current_preset_label.pack(side="left")
-        
-        # Preset selector
-        preset_selector_frame = ttk.Frame(preset_frame)
-        preset_selector_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5))
-        ttk.Label(preset_selector_frame, text="Select:").pack(side="left", padx=(0, 5))
-        self.preset_var = tk.StringVar(value="default")
-        self.selected_preset_id = "default"  # Store the actual preset ID separately
-        self.preset_combo = ttk.Combobox(preset_selector_frame, textvariable=self.preset_var,
-                                         state="readonly", width=15)
-        self.preset_combo["values"] = ["default"]
-        self.preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
-        self.preset_combo.pack(side="left", fill="x", expand=True)
-        
-        # Apply preset button
-        self.apply_preset_btn = ttk.Button(
-            preset_frame, text="✓ Apply Preset", command=self.apply_preset
-        )
-        self.apply_preset_btn.grid(row=2, column=0, sticky="ew", pady=2)
-        
-        # Refresh presets button
-        self.refresh_presets_btn = ttk.Button(
-            preset_frame, text="🔄 Refresh List", command=self.refresh_presets
-        )
-        self.refresh_presets_btn.grid(row=3, column=0, sticky="ew", pady=2)
-        
-        # Create custom preset button
-        self.create_preset_btn = ttk.Button(
-            preset_frame, text="➕ Create Custom", command=self.show_create_preset_dialog
-        )
-        self.create_preset_btn.grid(row=4, column=0, sticky="ew", pady=2)
-        
         # Motor controls
         motor_frame = ttk.LabelFrame(control_frame, text="Manual Motor Control", padding=10)
-        motor_frame.grid(row=3, column=0, sticky="ew", pady=5)
+        motor_frame.grid(row=2, column=0, sticky="ew", pady=5)
         motor_frame.grid_columnconfigure(0, weight=1)
         motor_frame.grid_columnconfigure(1, weight=1)
         
@@ -239,7 +218,7 @@ class ScannerGUI:
         
         # Status controls
         status_frame = ttk.LabelFrame(control_frame, text="Status", padding=10)
-        status_frame.grid(row=4, column=0, sticky="ew", pady=5)
+        status_frame.grid(row=3, column=0, sticky="ew", pady=5)
         status_frame.grid_columnconfigure(0, weight=1)
         
         self.refresh_btn = ttk.Button(
@@ -264,7 +243,7 @@ class ScannerGUI:
         
         # System controls
         system_frame = ttk.LabelFrame(control_frame, text="System", padding=10)
-        system_frame.grid(row=5, column=0, sticky="ew", pady=5)
+        system_frame.grid(row=4, column=0, sticky="ew", pady=5)
         system_frame.grid_columnconfigure(0, weight=1)
         
         self.shutdown_btn = ttk.Button(
@@ -273,7 +252,7 @@ class ScannerGUI:
         self.shutdown_btn.grid(row=0, column=0, sticky="ew", pady=2)
         
         # Spacer to push everything to top
-        control_frame.grid_rowconfigure(6, weight=1)
+        control_frame.grid_rowconfigure(5, weight=1)
     
     def _create_preview_panel(self, parent):
         """Create the preview and status panel."""
