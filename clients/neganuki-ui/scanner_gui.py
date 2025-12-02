@@ -185,9 +185,11 @@ class ScannerGUI:
         preset_selector_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5))
         ttk.Label(preset_selector_frame, text="Select:").pack(side="left", padx=(0, 5))
         self.preset_var = tk.StringVar(value="default")
+        self.selected_preset_id = "default"  # Store the actual preset ID separately
         self.preset_combo = ttk.Combobox(preset_selector_frame, textvariable=self.preset_var,
                                          state="readonly", width=15)
         self.preset_combo["values"] = ["default"]
+        self.preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
         self.preset_combo.pack(side="left", fill="x", expand=True)
         
         # Apply preset button
@@ -588,6 +590,16 @@ class ScannerGUI:
     
     # ========== Camera Preset Methods ==========
     
+    def _on_preset_selected(self, event=None):
+        """Callback when a preset is selected from the combobox."""
+        # Get the current selection index
+        current_index = self.preset_combo.current()
+        if current_index >= 0:
+            # Store the actual preset name from the values list
+            preset_values = self.preset_combo["values"]
+            if current_index < len(preset_values):
+                self.selected_preset_id = preset_values[current_index]
+    
     def refresh_presets(self):
         """Refresh the list of available camera presets."""
         if not self.connected:
@@ -598,14 +610,20 @@ class ScannerGUI:
             response = self.stub.ListCameraPresets(scanner_pb2.Empty())
             
             if response.success:
-                self.preset_combo["values"] = response.preset_names
-                self.log_status(f"✓ Loaded {len(response.preset_names)} presets", "success")
+                preset_list = list(response.preset_names)
+                self.preset_combo["values"] = preset_list
+                self.log_status(f"✓ Loaded {len(preset_list)} presets", "success")
                 
                 # Get current preset
                 preset_response = self.stub.GetCameraPreset(scanner_pb2.Empty())
                 if preset_response.success:
-                    self.current_preset_label.config(text=preset_response.preset_name)
-                    self.preset_var.set(preset_response.preset_name)
+                    current_preset = preset_response.preset_name
+                    self.current_preset_label.config(text=current_preset)
+                    self.selected_preset_id = current_preset
+                    
+                    # Set combobox to current preset if it exists in the list
+                    if current_preset in preset_list:
+                        self.preset_combo.set(current_preset)
             else:
                 self.log_status(f"✗ {response.message}", "error")
         
@@ -618,7 +636,8 @@ class ScannerGUI:
             messagebox.showwarning("Not Connected", "Please connect to the scanner first")
             return
         
-        preset_name = self.preset_var.get().strip()
+        # Use the stored preset ID instead of reading from the combobox
+        preset_name = self.selected_preset_id
         if not preset_name:
             messagebox.showwarning("No Preset Selected", "Please select a preset first")
             return
