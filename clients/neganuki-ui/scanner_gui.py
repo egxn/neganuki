@@ -7,7 +7,7 @@ Built with Tkinter for compatibility with Raspberry Pi.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, simpledialog
 import threading
 import time
 from PIL import Image, ImageTk
@@ -135,7 +135,7 @@ class ScannerGUI:
                                                font=("", 9, "bold"))
         self.current_preset_label.pack(side="left")
         
-        # Preset selector with apply button on same row
+        # Preset selector with buttons on same row
         preset_selector_frame = ttk.Frame(preset_frame)
         preset_selector_frame.grid(row=1, column=0, sticky="ew", pady=(0, 5))
         ttk.Label(preset_selector_frame, text="Select:").pack(side="left", padx=(0, 5))
@@ -147,27 +147,85 @@ class ScannerGUI:
         self.preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
         self.preset_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
         
-        # Apply button next to selector
-        self.apply_preset_btn = ttk.Button(
-            preset_selector_frame, text="Apply", command=self.apply_preset, width=8
+        # Refresh button
+        self.refresh_presets_btn = ttk.Button(
+            preset_selector_frame, text="🔄", command=self.refresh_presets, width=3
         )
-        self.apply_preset_btn.pack(side="left")
+        self.refresh_presets_btn.pack(side="left")
         
-        # Refresh and Create buttons
+        # Preset controls - Compact layout
+        controls_container = ttk.Frame(preset_frame)
+        controls_container.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+        controls_container.grid_columnconfigure(0, weight=1)
+        controls_container.grid_columnconfigure(1, weight=1)
+        
+        # Store control variables
+        self.preset_controls = {}
+        
+        # ExposureTime
+        exp_frame = ttk.Frame(controls_container)
+        exp_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=2)
+        ttk.Label(exp_frame, text="Exposure (μs):").pack(side="left", padx=(0, 5))
+        self.preset_controls["ExposureTime"] = tk.StringVar(value="10000")
+        ttk.Entry(exp_frame, textvariable=self.preset_controls["ExposureTime"], 
+                  width=10).pack(side="left")
+        
+        # ColourGains - R and B
+        cg_frame = ttk.Frame(controls_container)
+        cg_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=2)
+        ttk.Label(cg_frame, text="Gains R,B:").pack(side="left", padx=(0, 5))
+        self.preset_controls["ColourGains_R"] = tk.StringVar(value="2.2")
+        self.preset_controls["ColourGains_B"] = tk.StringVar(value="1.6")
+        ttk.Entry(cg_frame, textvariable=self.preset_controls["ColourGains_R"], 
+                  width=6).pack(side="left", padx=(0, 2))
+        ttk.Entry(cg_frame, textvariable=self.preset_controls["ColourGains_B"], 
+                  width=6).pack(side="left")
+        
+        # Brightness and Contrast
+        br_frame = ttk.Frame(controls_container)
+        br_frame.grid(row=2, column=0, sticky="ew", pady=2, padx=(0, 2))
+        ttk.Label(br_frame, text="Bright:").pack(side="left", padx=(0, 3))
+        self.preset_controls["Brightness"] = tk.StringVar(value="0.0")
+        ttk.Entry(br_frame, textvariable=self.preset_controls["Brightness"], 
+                  width=6).pack(side="left")
+        
+        co_frame = ttk.Frame(controls_container)
+        co_frame.grid(row=2, column=1, sticky="ew", pady=2, padx=(2, 0))
+        ttk.Label(co_frame, text="Contrast:").pack(side="left", padx=(0, 3))
+        self.preset_controls["Contrast"] = tk.StringVar(value="1.0")
+        ttk.Entry(co_frame, textvariable=self.preset_controls["Contrast"], 
+                  width=6).pack(side="left")
+        
+        # Sharpness and Saturation
+        sh_frame = ttk.Frame(controls_container)
+        sh_frame.grid(row=3, column=0, sticky="ew", pady=2, padx=(0, 2))
+        ttk.Label(sh_frame, text="Sharp:").pack(side="left", padx=(0, 3))
+        self.preset_controls["Sharpness"] = tk.StringVar(value="0.0")
+        ttk.Entry(sh_frame, textvariable=self.preset_controls["Sharpness"], 
+                  width=6).pack(side="left")
+        
+        sa_frame = ttk.Frame(controls_container)
+        sa_frame.grid(row=3, column=1, sticky="ew", pady=2, padx=(2, 0))
+        ttk.Label(sa_frame, text="Satur:").pack(side="left", padx=(0, 3))
+        self.preset_controls["Saturation"] = tk.StringVar(value="1.0")
+        ttk.Entry(sa_frame, textvariable=self.preset_controls["Saturation"], 
+                  width=6).pack(side="left")
+        
+        # Apply and Save buttons
         buttons_frame = ttk.Frame(preset_frame)
-        buttons_frame.grid(row=2, column=0, sticky="ew")
+        buttons_frame.grid(row=3, column=0, sticky="ew", pady=(5, 0))
         buttons_frame.grid_columnconfigure(0, weight=1)
         buttons_frame.grid_columnconfigure(1, weight=1)
         
-        self.refresh_presets_btn = ttk.Button(
-            buttons_frame, text="🔄 Refresh", command=self.refresh_presets
+        self.apply_preset_btn = ttk.Button(
+            buttons_frame, text="✓ Apply", command=self.apply_preset
         )
-        self.refresh_presets_btn.grid(row=0, column=0, sticky="ew", padx=(0, 2), pady=2)
+        self.apply_preset_btn.grid(row=0, column=0, sticky="ew", padx=(0, 2))
         
-        self.create_preset_btn = ttk.Button(
-            buttons_frame, text="➕ Create", command=self.show_create_preset_dialog
+        self.save_preset_btn = ttk.Button(
+            buttons_frame, text="💾 Save As...", command=self.save_preset_as
         )
-        self.create_preset_btn.grid(row=0, column=1, sticky="ew", padx=(2, 0), pady=2)
+        self.save_preset_btn.grid(row=0, column=1, sticky="ew", padx=(2, 0))
         
         # Capture controls
         capture_frame = ttk.LabelFrame(control_frame, text="Single Frame Capture", padding=10)
@@ -571,6 +629,58 @@ class ScannerGUI:
             preset_values = self.preset_combo["values"]
             if current_index < len(preset_values):
                 self.selected_preset_id = preset_values[current_index]
+                # Load preset values into controls
+                self.load_preset_values(self.selected_preset_id)
+    
+    def load_preset_values(self, preset_name):
+        """Load preset values into the control fields."""
+        if not self.connected:
+            return
+        
+        try:
+            # Get preset info from server
+            response = self.stub.GetCameraPreset(scanner_pb2.Empty())
+            
+            # For now, we need to get the specific preset info
+            # Since the server returns current preset, we'll use local defaults
+            # This could be improved by adding a GetPresetByName RPC method
+            
+            # For now, just log that we selected it
+            self.log_status(f"Selected preset: {preset_name}", "info")
+            
+            # Set default values based on preset name (client-side defaults)
+            # These match the backend presets
+            preset_defaults = {
+                "default": {"ExposureTime": "10000", "ColourGains": ("2.2", "1.6"), 
+                           "Brightness": "0.0", "Contrast": "1.0", "Sharpness": "0.0", "Saturation": "1.0"},
+                "warm": {"ExposureTime": "10000", "ColourGains": ("2.5", "1.4"),
+                        "Brightness": "0.0", "Contrast": "1.0", "Sharpness": "0.0", "Saturation": "1.0"},
+                "cool": {"ExposureTime": "10000", "ColourGains": ("1.8", "1.9"),
+                        "Brightness": "0.0", "Contrast": "1.0", "Sharpness": "0.0", "Saturation": "1.0"},
+                "neutral": {"ExposureTime": "10000", "ColourGains": ("2.0", "1.7"),
+                           "Brightness": "0.0", "Contrast": "1.0", "Sharpness": "0.0", "Saturation": "1.0"},
+                "bright": {"ExposureTime": "20000", "ColourGains": ("2.2", "1.6"),
+                          "Brightness": "0.0", "Contrast": "1.0", "Sharpness": "0.0", "Saturation": "1.0"},
+                "dark": {"ExposureTime": "5000", "ColourGains": ("2.2", "1.6"),
+                        "Brightness": "0.0", "Contrast": "1.0", "Sharpness": "0.0", "Saturation": "1.0"},
+                "high_contrast": {"ExposureTime": "10000", "ColourGains": ("2.2", "1.6"),
+                                 "Brightness": "0.0", "Contrast": "1.3", "Sharpness": "0.5", "Saturation": "1.1"},
+                "soft": {"ExposureTime": "10000", "ColourGains": ("2.2", "1.6"),
+                        "Brightness": "0.0", "Contrast": "0.8", "Sharpness": "-0.5", "Saturation": "0.9"},
+            }
+            
+            if preset_name in preset_defaults:
+                values = preset_defaults[preset_name]
+                self.preset_controls["ExposureTime"].set(values["ExposureTime"])
+                self.preset_controls["ColourGains_R"].set(values["ColourGains"][0])
+                self.preset_controls["ColourGains_B"].set(values["ColourGains"][1])
+                self.preset_controls["Brightness"].set(values["Brightness"])
+                self.preset_controls["Contrast"].set(values["Contrast"])
+                self.preset_controls["Sharpness"].set(values["Sharpness"])
+                self.preset_controls["Saturation"].set(values["Saturation"])
+        
+        except Exception as e:
+            self.log_status(f"✗ Error loading preset values: {e}", "error")
     
     def refresh_presets(self):
         """Refresh the list of available camera presets."""
@@ -603,26 +713,54 @@ class ScannerGUI:
             self.log_status(f"✗ Error loading presets: {e}", "error")
     
     def apply_preset(self):
-        """Apply the selected camera preset."""
+        """Apply the preset with current control values (may be modified)."""
         if not self.connected:
             messagebox.showwarning("Not Connected", "Please connect to the scanner first")
             return
         
-        # Use the stored preset ID instead of reading from the combobox
+        # Use the stored preset ID
         preset_name = self.selected_preset_id
         if not preset_name:
             messagebox.showwarning("No Preset Selected", "Please select a preset first")
             return
         
         try:
-            self.log_status(f"Applying preset '{preset_name}'...", "info")
+            # Get current values from controls
+            controls_dict = {
+                "AeEnable": "False",
+                "ExposureTime": self.preset_controls["ExposureTime"].get(),
+                "AwbEnable": "False",
+                "ColourGains": f"{self.preset_controls['ColourGains_R'].get()},{self.preset_controls['ColourGains_B'].get()}",
+                "Brightness": self.preset_controls["Brightness"].get(),
+                "Contrast": self.preset_controls["Contrast"].get(),
+                "Sharpness": self.preset_controls["Sharpness"].get(),
+                "Saturation": self.preset_controls["Saturation"].get(),
+            }
+            
+            # Create a temporary preset with current values
+            temp_preset_name = f"_temp_{preset_name}"
+            self.log_status(f"Applying preset with custom values...", "info")
+            
+            # Create temporary preset
+            create_response = self.stub.CreateCameraPreset(
+                scanner_pb2.CreatePresetRequest(
+                    preset_name=temp_preset_name,
+                    controls=controls_dict
+                )
+            )
+            
+            if not create_response.success:
+                self.log_status(f"✗ Failed to create temp preset: {create_response.message}", "error")
+                return
+            
+            # Apply the temporary preset
             response = self.stub.SetCameraPreset(
-                scanner_pb2.SetPresetRequest(preset_name=preset_name)
+                scanner_pb2.SetPresetRequest(preset_name=temp_preset_name)
             )
             
             if response.success:
-                self.log_status(f"✓ {response.message}", "success")
-                self.current_preset_label.config(text=preset_name)
+                self.log_status(f"✓ Preset applied with custom values", "success")
+                self.current_preset_label.config(text=f"{preset_name}*")
             else:
                 self.log_status(f"✗ {response.message}", "error")
                 messagebox.showerror("Preset Error", response.message)
@@ -631,173 +769,56 @@ class ScannerGUI:
             self.log_status(f"✗ Error: {e}", "error")
             messagebox.showerror("Preset Error", f"Failed to apply preset:\n{e}")
     
-    def show_create_preset_dialog(self):
-        """Show dialog to create a custom camera preset."""
+    def save_preset_as(self):
+        """Save current control values as a new preset."""
         if not self.connected:
             messagebox.showwarning("Not Connected", "Please connect to the scanner first")
             return
         
-        # Create dialog window
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Create Custom Preset")
-        dialog.geometry("400x500")
-        dialog.resizable(False, False)
-        
-        # Make it modal
-        dialog.transient(self.root)
-        dialog.grab_set()
-        
-        # Main frame
-        main_frame = ttk.Frame(dialog, padding=15)
-        main_frame.pack(fill="both", expand=True)
-        
-        # Preset name
-        ttk.Label(main_frame, text="Preset Name:", font=("", 10, "bold")).pack(anchor="w", pady=(0, 5))
-        name_var = tk.StringVar()
-        name_entry = ttk.Entry(main_frame, textvariable=name_var)
-        name_entry.pack(fill="x", pady=(0, 15))
-        
-        # Create a scrollable frame for controls
-        canvas = tk.Canvas(main_frame, height=300)
-        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        # Ask for preset name
+        preset_name = tk.simpledialog.askstring(
+            "Save Preset",
+            "Enter name for new preset:",
+            parent=self.root
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        if not preset_name or not preset_name.strip():
+            return
         
-        # Control inputs
-        ttk.Label(scrollable_frame, text="Control Values:", font=("", 10, "bold")).pack(anchor="w", pady=(0, 10))
+        preset_name = preset_name.strip()
         
-        controls = {}
-        
-        # AeEnable
-        ae_frame = ttk.Frame(scrollable_frame)
-        ae_frame.pack(fill="x", pady=5)
-        ttk.Label(ae_frame, text="AeEnable:").pack(side="left", padx=(0, 10))
-        ae_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(ae_frame, variable=ae_var).pack(side="left")
-        controls["AeEnable"] = ae_var
-        
-        # ExposureTime
-        exp_frame = ttk.Frame(scrollable_frame)
-        exp_frame.pack(fill="x", pady=5)
-        ttk.Label(exp_frame, text="ExposureTime (μs):").pack(side="left", padx=(0, 10))
-        exp_var = tk.StringVar(value="10000")
-        ttk.Entry(exp_frame, textvariable=exp_var, width=15).pack(side="left")
-        controls["ExposureTime"] = exp_var
-        
-        # AwbEnable
-        awb_frame = ttk.Frame(scrollable_frame)
-        awb_frame.pack(fill="x", pady=5)
-        ttk.Label(awb_frame, text="AwbEnable:").pack(side="left", padx=(0, 10))
-        awb_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(awb_frame, variable=awb_var).pack(side="left")
-        controls["AwbEnable"] = awb_var
-        
-        # ColourGains
-        cg_frame = ttk.Frame(scrollable_frame)
-        cg_frame.pack(fill="x", pady=5)
-        ttk.Label(cg_frame, text="ColourGains (R,B):").pack(side="left", padx=(0, 10))
-        cg_r_var = tk.StringVar(value="2.2")
-        cg_b_var = tk.StringVar(value="1.6")
-        ttk.Entry(cg_frame, textvariable=cg_r_var, width=8).pack(side="left", padx=(0, 5))
-        ttk.Entry(cg_frame, textvariable=cg_b_var, width=8).pack(side="left")
-        controls["ColourGains"] = (cg_r_var, cg_b_var)
-        
-        # Brightness
-        br_frame = ttk.Frame(scrollable_frame)
-        br_frame.pack(fill="x", pady=5)
-        ttk.Label(br_frame, text="Brightness:").pack(side="left", padx=(0, 10))
-        br_var = tk.StringVar(value="0.0")
-        ttk.Entry(br_frame, textvariable=br_var, width=15).pack(side="left")
-        controls["Brightness"] = br_var
-        
-        # Contrast
-        co_frame = ttk.Frame(scrollable_frame)
-        co_frame.pack(fill="x", pady=5)
-        ttk.Label(co_frame, text="Contrast:").pack(side="left", padx=(0, 10))
-        co_var = tk.StringVar(value="1.0")
-        ttk.Entry(co_frame, textvariable=co_var, width=15).pack(side="left")
-        controls["Contrast"] = co_var
-        
-        # Sharpness
-        sh_frame = ttk.Frame(scrollable_frame)
-        sh_frame.pack(fill="x", pady=5)
-        ttk.Label(sh_frame, text="Sharpness:").pack(side="left", padx=(0, 10))
-        sh_var = tk.StringVar(value="0.0")
-        ttk.Entry(sh_frame, textvariable=sh_var, width=15).pack(side="left")
-        controls["Sharpness"] = sh_var
-        
-        # Saturation
-        sa_frame = ttk.Frame(scrollable_frame)
-        sa_frame.pack(fill="x", pady=5)
-        ttk.Label(sa_frame, text="Saturation:").pack(side="left", padx=(0, 10))
-        sa_var = tk.StringVar(value="1.0")
-        ttk.Entry(sa_frame, textvariable=sa_var, width=15).pack(side="left")
-        controls["Saturation"] = sa_var
-        
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Note about white balance
-        note_frame = ttk.Frame(main_frame)
-        note_frame.pack(fill="x", pady=(10, 0))
-        note_label = ttk.Label(note_frame, text="⚠ Keep ColourGains consistent for stitching!", 
-                               foreground="orange", font=("", 9))
-        note_label.pack()
-        
-        # Buttons
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill="x", pady=(15, 0))
-        
-        def create_preset():
-            preset_name = name_var.get().strip()
-            if not preset_name:
-                messagebox.showwarning("Invalid Name", "Please enter a preset name")
-                return
+        try:
+            # Get current values from controls
+            controls_dict = {
+                "AeEnable": "False",
+                "ExposureTime": self.preset_controls["ExposureTime"].get(),
+                "AwbEnable": "False",
+                "ColourGains": f"{self.preset_controls['ColourGains_R'].get()},{self.preset_controls['ColourGains_B'].get()}",
+                "Brightness": self.preset_controls["Brightness"].get(),
+                "Contrast": self.preset_controls["Contrast"].get(),
+                "Sharpness": self.preset_controls["Sharpness"].get(),
+                "Saturation": self.preset_controls["Saturation"].get(),
+            }
             
-            try:
-                # Build controls dict
-                controls_dict = {
-                    "AeEnable": str(controls["AeEnable"].get()),
-                    "ExposureTime": controls["ExposureTime"].get(),
-                    "AwbEnable": str(controls["AwbEnable"].get()),
-                    "ColourGains": f"{controls['ColourGains'][0].get()},{controls['ColourGains'][1].get()}",
-                    "Brightness": controls["Brightness"].get(),
-                    "Contrast": controls["Contrast"].get(),
-                    "Sharpness": controls["Sharpness"].get(),
-                    "Saturation": controls["Saturation"].get(),
-                }
-                
-                self.log_status(f"Creating preset '{preset_name}'...", "info")
-                response = self.stub.CreateCameraPreset(
-                    scanner_pb2.CreatePresetRequest(
-                        preset_name=preset_name,
-                        controls=controls_dict
-                    )
+            self.log_status(f"Creating preset '{preset_name}'...", "info")
+            response = self.stub.CreateCameraPreset(
+                scanner_pb2.CreatePresetRequest(
+                    preset_name=preset_name,
+                    controls=controls_dict
                 )
-                
-                if response.success:
-                    self.log_status(f"✓ {response.message}", "success")
-                    messagebox.showinfo("Success", f"Preset '{preset_name}' created successfully!")
-                    dialog.destroy()
-                    self.refresh_presets()
-                else:
-                    self.log_status(f"✗ {response.message}", "error")
-                    messagebox.showerror("Error", response.message)
+            )
             
-            except Exception as e:
-                self.log_status(f"✗ Error: {e}", "error")
-                messagebox.showerror("Error", f"Failed to create preset:\n{e}")
+            if response.success:
+                self.log_status(f"✓ {response.message}", "success")
+                messagebox.showinfo("Success", f"Preset '{preset_name}' saved successfully!")
+                self.refresh_presets()
+            else:
+                self.log_status(f"✗ {response.message}", "error")
+                messagebox.showerror("Error", response.message)
         
-        ttk.Button(button_frame, text="Create", command=create_preset, 
-                   style="Accent.TButton").pack(side="left", padx=(0, 5))
-        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side="left")
+        except Exception as e:
+            self.log_status(f"✗ Error: {e}", "error")
+            messagebox.showerror("Error", f"Failed to save preset:\n{e}")
     
     # ========== Motor Control Methods ==========
     
