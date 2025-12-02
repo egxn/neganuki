@@ -416,9 +416,6 @@ class ScannerGUI:
             
             if response.success:
                 self.log_status(f"✓ {response.message}", "success")
-                self.start_btn.config(state="disabled")
-                self.pause_btn.config(state="normal")
-                self.stop_btn.config(state="normal")
                 self.progress_bar.start()
                 
                 # Enable monitoring automatically
@@ -444,8 +441,6 @@ class ScannerGUI:
             
             if response.success:
                 self.log_status(f"✓ {response.message}", "success")
-                self.pause_btn.config(state="disabled")
-                self.resume_btn.config(state="normal")
                 self.progress_bar.stop()
             else:
                 self.log_status(f"✗ {response.message}", "error")
@@ -464,8 +459,6 @@ class ScannerGUI:
             
             if response.success:
                 self.log_status(f"✓ {response.message}", "success")
-                self.resume_btn.config(state="disabled")
-                self.pause_btn.config(state="normal")
                 self.progress_bar.start()
             else:
                 self.log_status(f"✗ {response.message}", "error")
@@ -1129,21 +1122,16 @@ class ScannerGUI:
         """Enable or disable control buttons based on connection state."""
         state = "normal" if enabled else "disabled"
         
-        self.start_btn.config(state=state)
         self.capture_rgb_btn.config(state=state)
         self.capture_raw_btn.config(state=state)
         self.refresh_btn.config(state=state)
         self.shutdown_btn.config(state=state)
         
         if not enabled:
-            self.reset_scan_buttons()
+            self.progress_bar.stop()
     
     def reset_scan_buttons(self):
         """Reset scan control buttons to default state."""
-        self.start_btn.config(state="normal" if self.connected else "disabled")
-        self.pause_btn.config(state="disabled")
-        self.resume_btn.config(state="disabled")
-        self.stop_btn.config(state="disabled")
         self.progress_bar.stop()
     
     def log_status(self, message, level="info"):
