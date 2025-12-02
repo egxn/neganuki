@@ -618,7 +618,7 @@ class ScannerGUI:
             messagebox.showwarning("Not Connected", "Please connect to the scanner first")
             return
         
-        preset_name = self.preset_var.get()
+        preset_name = self.preset_var.get().strip()
         if not preset_name:
             messagebox.showwarning("No Preset Selected", "Please select a preset first")
             return

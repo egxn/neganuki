@@ -309,12 +309,16 @@ class ScannerServiceImpl:
         """Set camera controls to a named preset."""
         try:
             preset_name = request.preset_name
-            self.logger.info(f"SetCameraPreset called: {preset_name}")
+            self.logger.info(f"SetCameraPreset called: '{preset_name}'")
             
             # Check if scanner is idle
             current_state = self.controller.current_state()
             if current_state != 'idle':
                 return False, f"Cannot change preset in state: {current_state}. Must be in idle state."
+            
+            # Log available presets for debugging
+            available = self.controller.camera.get_available_presets()
+            self.logger.debug(f"Available presets: {available}")
             
             # Apply the preset
             success = self.controller.camera.set_preset(preset_name)
@@ -325,7 +329,7 @@ class ScannerServiceImpl:
                 return False, f"Unknown preset: {preset_name}"
                 
         except Exception as e:
-            self.logger.error(f"SetCameraPreset failed: {e}")
+            self.logger.error(f"SetCameraPreset failed: {e}", exc_info=True)
             return False, f"Failed to set preset: {e}"
     
     def GetCameraPreset(self, request):
@@ -337,8 +341,14 @@ class ScannerServiceImpl:
             preset_name = preset_info.get("name", "unknown")
             controls = preset_info.get("controls", {})
             
-            # Convert controls to string representation
-            controls_str = {k: str(v) for k, v in controls.items()}
+            # Convert controls to string representation with proper formatting
+            controls_str = {}
+            for k, v in controls.items():
+                if k == "ColourGains" and isinstance(v, tuple):
+                    # Format without spaces for easier parsing
+                    controls_str[k] = f"{v[0]},{v[1]}"
+                else:
+                    controls_str[k] = str(v)
             
             return True, f"Current preset: {preset_name}", preset_name, controls_str
             
