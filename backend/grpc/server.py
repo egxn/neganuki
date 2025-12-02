@@ -304,6 +304,103 @@ class ScannerServiceImpl:
         except Exception as e:
             self.logger.error(f"CalculateColourGains failed: {e}")
             return False, f"Calculation failed: {e}", 0.0, 0.0
+    
+    def SetCameraPreset(self, request):
+        """Set camera controls to a named preset."""
+        try:
+            preset_name = request.preset_name
+            self.logger.info(f"SetCameraPreset called: {preset_name}")
+            
+            # Check if scanner is idle
+            current_state = self.controller.current_state()
+            if current_state != 'idle':
+                return False, f"Cannot change preset in state: {current_state}. Must be in idle state."
+            
+            # Apply the preset
+            success = self.controller.camera.set_preset(preset_name)
+            
+            if success:
+                return True, f"Preset '{preset_name}' applied successfully"
+            else:
+                return False, f"Unknown preset: {preset_name}"
+                
+        except Exception as e:
+            self.logger.error(f"SetCameraPreset failed: {e}")
+            return False, f"Failed to set preset: {e}"
+    
+    def GetCameraPreset(self, request):
+        """Get information about the current camera preset."""
+        try:
+            self.logger.info("GetCameraPreset called")
+            
+            preset_info = self.controller.camera.get_preset_info()
+            preset_name = preset_info.get("name", "unknown")
+            controls = preset_info.get("controls", {})
+            
+            # Convert controls to string representation
+            controls_str = {k: str(v) for k, v in controls.items()}
+            
+            return True, f"Current preset: {preset_name}", preset_name, controls_str
+            
+        except Exception as e:
+            self.logger.error(f"GetCameraPreset failed: {e}")
+            return False, f"Failed to get preset: {e}", "", {}
+    
+    def ListCameraPresets(self, request):
+        """List all available camera presets."""
+        try:
+            self.logger.info("ListCameraPresets called")
+            
+            presets = self.controller.camera.get_available_presets()
+            
+            return True, f"Found {len(presets)} presets", presets
+            
+        except Exception as e:
+            self.logger.error(f"ListCameraPresets failed: {e}")
+            return False, f"Failed to list presets: {e}", []
+    
+    def CreateCameraPreset(self, request):
+        """Create a new custom camera preset."""
+        try:
+            preset_name = request.preset_name
+            controls_str = dict(request.controls)
+            
+            self.logger.info(f"CreateCameraPreset called: {preset_name}")
+            
+            # Check if scanner is idle
+            current_state = self.controller.current_state()
+            if current_state != 'idle':
+                return False, f"Cannot create preset in state: {current_state}. Must be in idle state."
+            
+            # Parse controls from string format
+            controls = {}
+            for key, value_str in controls_str.items():
+                # Parse different types
+                if key in ("AeEnable", "AwbEnable"):
+                    controls[key] = value_str.lower() in ("true", "1", "yes")
+                elif key == "ColourGains":
+                    # Parse tuple format: "(1.5, 1.2)" or "1.5,1.2"
+                    value_str = value_str.strip("()").replace(" ", "")
+                    parts = value_str.split(",")
+                    if len(parts) != 2:
+                        return False, f"ColourGains must have 2 values, got: {value_str}"
+                    controls[key] = (float(parts[0]), float(parts[1]))
+                elif key == "ExposureTime":
+                    controls[key] = int(value_str)
+                else:
+                    controls[key] = float(value_str)
+            
+            # Create the preset
+            success = self.controller.camera.create_custom_preset(preset_name, controls)
+            
+            if success:
+                return True, f"Preset '{preset_name}' created successfully"
+            else:
+                return False, f"Failed to create preset '{preset_name}'"
+                
+        except Exception as e:
+            self.logger.error(f"CreateCameraPreset failed: {e}")
+            return False, f"Failed to create preset: {e}"
 
 
 # If generated gRPC classes exist, map them to service implementation
@@ -399,6 +496,31 @@ if scanner_pb2 is not None and scanner_pb2_grpc is not None:
                         r_gain=r_gain, 
                         b_gain=b_gain
                     )
+                
+                def SetCameraPreset(inner_self, request, context):
+                    ok, msg = self._impl.SetCameraPreset(request)
+                    return scanner_pb2.BasicResponse(success=ok, message=msg)
+                
+                def GetCameraPreset(inner_self, request, context):
+                    ok, msg, preset_name, controls = self._impl.GetCameraPreset(request)
+                    return scanner_pb2.PresetInfoResponse(
+                        success=ok,
+                        message=msg,
+                        preset_name=preset_name,
+                        controls=controls
+                    )
+                
+                def ListCameraPresets(inner_self, request, context):
+                    ok, msg, presets = self._impl.ListCameraPresets(request)
+                    return scanner_pb2.PresetListResponse(
+                        success=ok,
+                        message=msg,
+                        preset_names=presets
+                    )
+                
+                def CreateCameraPreset(inner_self, request, context):
+                    ok, msg = self._impl.CreateCameraPreset(request)
+                    return scanner_pb2.BasicResponse(success=ok, message=msg)
 
             scanner_pb2_grpc.add_ScannerServiceServicer_to_server(Servicer(), self.server)
             self.server.add_insecure_port(f"{self.host}:{self.port}")

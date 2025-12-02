@@ -57,16 +57,100 @@ except Exception:
     tifffile = None
 
 
-DEFAULT_MANUAL_CONTROLS: Dict[str, Any] = {
-    "AeEnable": False,
-    "ExposureTime": 10000,
-    "AwbEnable": False,
-    "ColourGains": (1.5, 1.2),
-    "Brightness": 0.0,
-    "Contrast": 1.0,
-    "Sharpness": 0.0,
-    "Saturation": 1.0,
+# CRITICAL: White balance (AwbEnable=False + fixed ColourGains) MUST remain constant
+# across all captures for consistent stitching. Only exposure and image processing
+# parameters should vary between presets.
+#
+# ColourGains format: (red_gain, blue_gain) relative to green channel
+# - Higher red_gain = more red (compensates cyan/green tint)
+# - Higher blue_gain = more blue (compensates yellow tint)
+# - Default daylight ~(2.0, 1.5), tungsten ~(1.3, 2.2), fluorescent ~(1.8, 1.9)
+
+CONTROL_PRESETS: Dict[str, Dict[str, Any]] = {
+    "default": {
+        "AeEnable": False,
+        "ExposureTime": 10000,  # 10ms
+        "AwbEnable": False,
+        "ColourGains": (2.2, 1.6),  # Warmer - more red/blue vs green
+        "Brightness": 0.0,
+        "Contrast": 1.0,
+        "Sharpness": 0.0,
+        "Saturation": 1.0,
+    },
+    "warm": {
+        "AeEnable": False,
+        "ExposureTime": 10000,  # 10ms
+        "AwbEnable": False,
+        "ColourGains": (2.5, 1.4),  # More red, less blue - warm tungsten-like
+        "Brightness": 0.0,
+        "Contrast": 1.0,
+        "Sharpness": 0.0,
+        "Saturation": 1.0,
+    },
+    "cool": {
+        "AeEnable": False,
+        "ExposureTime": 10000,  # 10ms
+        "AwbEnable": False,
+        "ColourGains": (1.8, 1.9),  # More blue, less red - cool fluorescent-like
+        "Brightness": 0.0,
+        "Contrast": 1.0,
+        "Sharpness": 0.0,
+        "Saturation": 1.0,
+    },
+    "neutral": {
+        "AeEnable": False,
+        "ExposureTime": 10000,  # 10ms
+        "AwbEnable": False,
+        "ColourGains": (2.0, 1.7),  # Balanced neutral - typical daylight
+        "Brightness": 0.0,
+        "Contrast": 1.0,
+        "Sharpness": 0.0,
+        "Saturation": 1.0,
+    },
+    "bright": {
+        "AeEnable": False,
+        "ExposureTime": 20000,  # 20ms - for darker negatives
+        "AwbEnable": False,
+        "ColourGains": (2.2, 1.6),  # FIXED - same as default
+        "Brightness": 0.0,
+        "Contrast": 1.0,
+        "Sharpness": 0.0,
+        "Saturation": 1.0,
+    },
+    "dark": {
+        "AeEnable": False,
+        "ExposureTime": 5000,  # 5ms - for overexposed negatives
+        "AwbEnable": False,
+        "ColourGains": (2.2, 1.6),  # FIXED - same as default
+        "Brightness": 0.0,
+        "Contrast": 1.0,
+        "Sharpness": 0.0,
+        "Saturation": 1.0,
+    },
+    "high_contrast": {
+        "AeEnable": False,
+        "ExposureTime": 10000,  # 10ms
+        "AwbEnable": False,
+        "ColourGains": (2.2, 1.6),  # FIXED - same as default
+        "Brightness": 0.0,
+        "Contrast": 1.3,  # Increased contrast
+        "Sharpness": 0.5,  # Added sharpness
+        "Saturation": 1.1,  # Slightly boosted saturation
+    },
+    "soft": {
+        "AeEnable": False,
+        "ExposureTime": 10000,  # 10ms
+        "AwbEnable": False,
+        "ColourGains": (2.2, 1.6),  # FIXED - same as default
+        "Brightness": 0.0,
+        "Contrast": 0.8,  # Reduced contrast
+        "Sharpness": -0.5,  # Reduced sharpness
+        "Saturation": 0.9,  # Slightly reduced saturation
+    },
 }
+
+# Keep backward compatibility
+DEFAULT_MANUAL_CONTROLS: Dict[str, Any] = CONTROL_PRESETS["default"]
 
 
 class IMX477Camera:
@@ -75,6 +159,7 @@ class IMX477Camera:
         self.picam: Optional[Picamera2Type] = None
         self.mode = "preview"  # preview | raw | dual
         self._current_config = None
+        self._current_preset = "default"  # Track active preset
 
         if Picamera2:
             self.picam = Picamera2()
@@ -310,7 +395,18 @@ class IMX477Camera:
         R_gain = round(R_gain, 3)
         B_gain = round(B_gain, 3)
 
-        logger.info(f"Computed ColourGains: R_gain={R_gain}, B_gain={B_gain}")
+        # Provide interpretation
+        color_cast = ""
+        if R_gain < 1.8 and B_gain < 1.4:
+            color_cast = " (image may appear green/cyan - increase both gains)"
+        elif R_gain > 2.5:
+            color_cast = " (image may appear too red - decrease R_gain)"
+        elif B_gain > 2.0:
+            color_cast = " (image may appear too blue - decrease B_gain)"
+        
+        logger.info(f"Computed ColourGains: R_gain={R_gain}, B_gain={B_gain}{color_cast}")
+        logger.info(f"Channel ratios - R/G: {mean_R/mean_G:.3f}, B/G: {mean_B/mean_G:.3f}")
+        
         return (R_gain, B_gain)
 
     def apply_manual_controls(self, overrides: Optional[Dict[str, Any]] = None) -> None:
@@ -395,6 +491,97 @@ class IMX477Camera:
             )
         except Exception as exc:
             logger.warning("Failed to apply manual controls: %s", exc)
+
+    def set_preset(self, preset_name: str) -> bool:
+        """Change to a different control preset by name.
+        
+        Args:
+            preset_name: Name of the preset from CONTROL_PRESETS
+            
+        Returns:
+            True if preset was applied successfully, False otherwise
+        """
+        if preset_name not in CONTROL_PRESETS:
+            logger.error(f"Unknown preset: {preset_name}. Available: {list(CONTROL_PRESETS.keys())}")
+            return False
+        
+        logger.info(f"Changing control preset from '{self._current_preset}' to '{preset_name}'")
+        self._current_preset = preset_name
+        self.apply_manual_controls(CONTROL_PRESETS[preset_name])
+        return True
+    
+    def get_current_preset(self) -> str:
+        """Get the name of the currently active preset."""
+        return self._current_preset
+    
+    def get_available_presets(self) -> list[str]:
+        """Get list of available preset names."""
+        return list(CONTROL_PRESETS.keys())
+    
+    def get_preset_info(self, preset_name: Optional[str] = None) -> Dict[str, Any]:
+        """Get detailed information about a preset.
+        
+        Args:
+            preset_name: Name of preset to query. If None, returns current preset.
+            
+        Returns:
+            Dictionary with preset configuration
+        """
+        name = preset_name or self._current_preset
+        if name not in CONTROL_PRESETS:
+            logger.error(f"Unknown preset: {name}")
+            return {}
+        
+        return {
+            "name": name,
+            "controls": CONTROL_PRESETS[name].copy(),
+            "is_current": name == self._current_preset
+        }
+    
+    def create_custom_preset(self, preset_name: str, controls: Dict[str, Any]) -> bool:
+        """Create or update a custom preset with given control values.
+        
+        Args:
+            preset_name: Name for the new preset (will overwrite if exists)
+            controls: Dictionary of control values (AeEnable, ExposureTime, ColourGains, etc.)
+            
+        Returns:
+            True if preset was created successfully, False otherwise
+        """
+        # Validate required fields
+        required_fields = ["AeEnable", "AwbEnable", "ColourGains"]
+        for field in required_fields:
+            if field not in controls:
+                logger.error(f"Missing required field '{field}' in custom preset")
+                return False
+        
+        # Ensure ColourGains is a tuple
+        if isinstance(controls.get("ColourGains"), (list, tuple)):
+            if len(controls["ColourGains"]) != 2:
+                logger.error("ColourGains must be a tuple of 2 values (r_gain, b_gain)")
+                return False
+            controls["ColourGains"] = tuple(controls["ColourGains"])
+        else:
+            logger.error("ColourGains must be a tuple of 2 values")
+            return False
+        
+        # Add default values for optional fields
+        defaults = {
+            "ExposureTime": 10000,
+            "Brightness": 0.0,
+            "Contrast": 1.0,
+            "Sharpness": 0.0,
+            "Saturation": 1.0,
+        }
+        
+        preset_controls = dict(defaults)
+        preset_controls.update(controls)
+        
+        # Add to global presets
+        CONTROL_PRESETS[preset_name] = preset_controls
+        
+        logger.info(f"Created/updated custom preset '{preset_name}': {preset_controls}")
+        return True
 
     def capture_frame(self) -> np.ndarray:
         """Capture an RGB frame (NumPy array)."""

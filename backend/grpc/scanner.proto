@@ -34,6 +34,12 @@ service ScannerService {
   
   // Calculate white balance colour gains
   rpc CalculateColourGains (Empty) returns (ColourGainsResponse);
+  
+  // Camera preset management
+  rpc SetCameraPreset (SetPresetRequest) returns (BasicResponse);
+  rpc GetCameraPreset (Empty) returns (PresetInfoResponse);
+  rpc ListCameraPresets (Empty) returns (PresetListResponse);
+  rpc CreateCameraPreset (CreatePresetRequest) returns (BasicResponse);
 }
 
 // --- Requests & Responses ---
@@ -100,4 +106,26 @@ message ColourGainsResponse {
   string message = 2;
   float r_gain = 3;  // Red channel gain
   float b_gain = 4;  // Blue channel gain
+}
+
+message SetPresetRequest {
+  string preset_name = 1;  // Name of the preset to activate
+}
+
+message PresetInfoResponse {
+  bool success = 1;
+  string message = 2;
+  string preset_name = 3;  // Current preset name
+  map<string, string> controls = 4;  // Current control values as strings
+}
+
+message PresetListResponse {
+  bool success = 1;
+  string message = 2;
+  repeated string preset_names = 3;  // List of available preset names
+}
+
+message CreatePresetRequest {
+  string preset_name = 1;
+  map<string, string> controls = 2;  // Control values as strings
 }
