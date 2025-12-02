@@ -160,6 +160,7 @@ class IMX477Camera:
         self.mode = "preview"  # preview | raw | dual
         self._current_config = None
         self._current_preset = "default"  # Track active preset
+        self._custom_presets: Dict[str, Dict[str, Any]] = {}  # Store custom presets
 
         if Picamera2:
             self.picam = Picamera2()
@@ -496,18 +497,25 @@ class IMX477Camera:
         """Change to a different control preset by name.
         
         Args:
-            preset_name: Name of the preset from CONTROL_PRESETS
+            preset_name: Name of the preset from CONTROL_PRESETS or custom presets
             
         Returns:
             True if preset was applied successfully, False otherwise
         """
-        if preset_name not in CONTROL_PRESETS:
-            logger.error(f"Unknown preset: {preset_name}. Available: {list(CONTROL_PRESETS.keys())}")
+        # Check built-in presets first
+        if preset_name in CONTROL_PRESETS:
+            preset_controls = CONTROL_PRESETS[preset_name]
+        # Then check custom presets
+        elif preset_name in self._custom_presets:
+            preset_controls = self._custom_presets[preset_name]
+        else:
+            all_presets = list(CONTROL_PRESETS.keys()) + list(self._custom_presets.keys())
+            logger.error(f"Unknown preset: {preset_name}. Available: {all_presets}")
             return False
         
         logger.info(f"Changing control preset from '{self._current_preset}' to '{preset_name}'")
         self._current_preset = preset_name
-        self.apply_manual_controls(CONTROL_PRESETS[preset_name])
+        self.apply_manual_controls(preset_controls)
         return True
     
     def get_current_preset(self) -> str:
@@ -516,7 +524,7 @@ class IMX477Camera:
     
     def get_available_presets(self) -> list[str]:
         """Get list of available preset names."""
-        return list(CONTROL_PRESETS.keys())
+        return list(CONTROL_PRESETS.keys()) + list(self._custom_presets.keys())
     
     def get_preset_info(self, preset_name: Optional[str] = None) -> Dict[str, Any]:
         """Get detailed information about a preset.
@@ -528,13 +536,20 @@ class IMX477Camera:
             Dictionary with preset configuration
         """
         name = preset_name or self._current_preset
-        if name not in CONTROL_PRESETS:
+        
+        # Check built-in presets first
+        if name in CONTROL_PRESETS:
+            controls = CONTROL_PRESETS[name].copy()
+        # Then check custom presets
+        elif name in self._custom_presets:
+            controls = self._custom_presets[name].copy()
+        else:
             logger.error(f"Unknown preset: {name}")
             return {}
         
         return {
             "name": name,
-            "controls": CONTROL_PRESETS[name].copy(),
+            "controls": controls,
             "is_current": name == self._current_preset
         }
     
@@ -577,8 +592,8 @@ class IMX477Camera:
         preset_controls = dict(defaults)
         preset_controls.update(controls)
         
-        # Add to global presets
-        CONTROL_PRESETS[preset_name] = preset_controls
+        # Store in instance custom presets (not global)
+        self._custom_presets[preset_name] = preset_controls
         
         logger.info(f"Created/updated custom preset '{preset_name}': {preset_controls}")
         return True
