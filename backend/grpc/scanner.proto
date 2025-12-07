@@ -40,6 +40,9 @@ service ScannerService {
   rpc GetCameraPreset (Empty) returns (PresetInfoResponse);
   rpc ListCameraPresets (Empty) returns (PresetListResponse);
   rpc CreateCameraPreset (CreatePresetRequest) returns (BasicResponse);
+  
+  // Set camera controls directly (without using a preset)
+  rpc SetCameraControls (CameraControlsRequest) returns (BasicResponse);
 }
 
 // --- Requests & Responses ---
@@ -128,4 +131,16 @@ message PresetListResponse {
 message CreatePresetRequest {
   string preset_name = 1;
   map<string, string> controls = 2;  // Control values as strings
+}
+
+message CameraControlsRequest {
+  bool ae_enable = 1;
+  int32 exposure_time = 2;
+  bool awb_enable = 3;
+  double r_gain = 4;
+  double b_gain = 5;
+  double brightness = 6;
+  double contrast = 7;
+  double sharpness = 8;
+  double saturation = 9;
 }

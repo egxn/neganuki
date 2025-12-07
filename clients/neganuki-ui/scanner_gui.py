@@ -713,61 +713,66 @@ class ScannerGUI:
             self.log_status(f"✗ Error loading presets: {e}", "error")
     
     def apply_preset(self):
-        """Apply the preset with current control values (may be modified)."""
+        """Apply the current control values from the input fields."""
         if not self.connected:
             messagebox.showwarning("Not Connected", "Please connect to the scanner first")
             return
         
-        # Use the stored preset ID
-        preset_name = self.selected_preset_id
-        if not preset_name:
-            messagebox.showwarning("No Preset Selected", "Please select a preset first")
-            return
-        
         try:
-            # Get current values from controls
-            controls_dict = {
-                "AeEnable": "False",
-                "ExposureTime": self.preset_controls["ExposureTime"].get(),
-                "AwbEnable": "False",
-                "ColourGains": f"{self.preset_controls['ColourGains_R'].get()},{self.preset_controls['ColourGains_B'].get()}",
-                "Brightness": self.preset_controls["Brightness"].get(),
-                "Contrast": self.preset_controls["Contrast"].get(),
-                "Sharpness": self.preset_controls["Sharpness"].get(),
-                "Saturation": self.preset_controls["Saturation"].get(),
-            }
+            # Read values from the input fields
+            r_gain = float(self.preset_controls["ColourGains_R"].get())
+            b_gain = float(self.preset_controls["ColourGains_B"].get())
+            exposure = int(self.preset_controls["ExposureTime"].get())
+            brightness = float(self.preset_controls["Brightness"].get())
+            contrast = float(self.preset_controls["Contrast"].get())
+            sharpness = float(self.preset_controls["Sharpness"].get())
+            saturation = float(self.preset_controls["Saturation"].get())
             
-            # Create a temporary preset with current values
-            temp_preset_name = f"_temp_{preset_name}"
-            self.log_status(f"Applying preset with custom values...", "info")
+            # Validate ranges
+            if not (0.1 <= r_gain <= 10.0 and 0.1 <= b_gain <= 10.0):
+                raise ValueError("Colour gains must be between 0.1 and 10.0")
+            if not (100 <= exposure <= 1000000):
+                raise ValueError("Exposure must be between 100 and 1000000 microseconds")
+            if not (-1.0 <= brightness <= 1.0):
+                raise ValueError("Brightness must be between -1.0 and 1.0")
+            if not (0.0 <= contrast <= 3.0):
+                raise ValueError("Contrast must be between 0.0 and 3.0")
+            if not (-10.0 <= sharpness <= 10.0):
+                raise ValueError("Sharpness must be between -10.0 and 10.0")
+            if not (0.0 <= saturation <= 3.0):
+                raise ValueError("Saturation must be between 0.0 and 3.0")
             
-            # Create temporary preset
-            create_response = self.stub.CreateCameraPreset(
-                scanner_pb2.CreatePresetRequest(
-                    preset_name=temp_preset_name,
-                    controls=controls_dict
-                )
+            self.log_status(f"Applying camera controls...", "info")
+            
+            # Create request with current values
+            request = scanner_pb2.CameraControlsRequest(
+                ae_enable=False,
+                exposure_time=exposure,
+                awb_enable=False,
+                r_gain=r_gain,
+                b_gain=b_gain,
+                brightness=brightness,
+                contrast=contrast,
+                sharpness=sharpness,
+                saturation=saturation
             )
             
-            if not create_response.success:
-                self.log_status(f"✗ Failed to create temp preset: {create_response.message}", "error")
-                return
-            
-            # Apply the temporary preset
-            response = self.stub.SetCameraPreset(
-                scanner_pb2.SetPresetRequest(preset_name=temp_preset_name)
-            )
+            response = self.stub.SetCameraControls(request)
             
             if response.success:
-                self.log_status(f"✓ Preset applied with custom values", "success")
-                self.current_preset_label.config(text=f"{preset_name}*")
+                self.log_status(f"✓ Controls applied: R={r_gain:.2f}, B={b_gain:.2f}, Exp={exposure}", "success")
+                # Update current preset label to show modified
+                if self.selected_preset_id:
+                    self.current_preset_label.config(text=f"{self.selected_preset_id}*")
             else:
-                self.log_status(f"✗ {response.message}", "error")
-                messagebox.showerror("Preset Error", response.message)
-        
+                self.log_status(f"✗ Failed: {response.message}", "error")
+                messagebox.showerror("Error", response.message)
+                
+        except ValueError as e:
+            messagebox.showerror("Invalid Input", str(e))
         except Exception as e:
-            self.log_status(f"✗ Error: {e}", "error")
-            messagebox.showerror("Preset Error", f"Failed to apply preset:\n{e}")
+            self.log_status(f"✗ Apply failed: {e}", "error")
+            messagebox.showerror("Error", f"Failed to apply controls: {e}")
     
     def save_preset_as(self):
         """Save current control values as a new preset."""

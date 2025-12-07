@@ -412,6 +412,32 @@ class ScannerServiceImpl:
             self.logger.error(f"CreateCameraPreset failed: {e}")
             return False, f"Failed to create preset: {e}"
 
+    def SetCameraControls(self, request):
+        """Set camera controls directly without using a preset."""
+        try:
+            self.logger.info("SetCameraControls called")
+            
+            # Build controls dict from request
+            controls = {
+                "AeEnable": request.ae_enable,
+                "ExposureTime": request.exposure_time,
+                "AwbEnable": request.awb_enable,
+                "ColourGains": (request.r_gain, request.b_gain),
+                "Brightness": request.brightness,
+                "Contrast": request.contrast,
+                "Sharpness": request.sharpness,
+                "Saturation": request.saturation,
+            }
+            
+            self.logger.info(f"Applying controls: {controls}")
+            self.controller.camera.apply_manual_controls(overrides=controls)
+            
+            return True, "Camera controls applied successfully"
+            
+        except Exception as e:
+            self.logger.error(f"SetCameraControls failed: {e}")
+            return False, f"Failed to set camera controls: {e}"
+
 
 # If generated gRPC classes exist, map them to service implementation
 if scanner_pb2 is not None and scanner_pb2_grpc is not None:
@@ -530,6 +556,10 @@ if scanner_pb2 is not None and scanner_pb2_grpc is not None:
                 
                 def CreateCameraPreset(inner_self, request, context):
                     ok, msg = self._impl.CreateCameraPreset(request)
+                    return scanner_pb2.BasicResponse(success=ok, message=msg)
+                
+                def SetCameraControls(inner_self, request, context):
+                    ok, msg = self._impl.SetCameraControls(request)
                     return scanner_pb2.BasicResponse(success=ok, message=msg)
 
             scanner_pb2_grpc.add_ScannerServiceServicer_to_server(Servicer(), self.server)
