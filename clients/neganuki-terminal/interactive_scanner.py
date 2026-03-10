@@ -150,6 +150,17 @@ def main():
                 path = client.capture_frame(raw=False)
                 if path:
                     print(f"\n{Colors.OKGREEN}Frame saved to: {path}{Colors.ENDC}")
+                    copy_to_host = input("Copy frame to SSH client host? [y/N]: ").strip().lower()
+                    if copy_to_host == 'y':
+                        remote_path = input("Remote destination path [.]: ").strip() or '.'
+                        remote_user = input("Remote username [auto]: ").strip() or None
+                        remote_host = input("Remote host [auto-detect SSH client]: ").strip() or None
+                        client.copy_file_to_host(
+                            file_path=path,
+                            target_host=remote_host,
+                            target_user=remote_user,
+                            target_path=remote_path,
+                        )
             
             elif choice == '6':
                 # Capture RAW frame
@@ -157,6 +168,17 @@ def main():
                 path = client.capture_frame(raw=True)
                 if path:
                     print(f"\n{Colors.OKGREEN}RAW frame saved to: {path}{Colors.ENDC}")
+                    copy_to_host = input("Copy RAW frame to SSH client host? [y/N]: ").strip().lower()
+                    if copy_to_host == 'y':
+                        remote_path = input("Remote destination path [.]: ").strip() or '.'
+                        remote_user = input("Remote username [auto]: ").strip() or None
+                        remote_host = input("Remote host [auto-detect SSH client]: ").strip() or None
+                        client.copy_file_to_host(
+                            file_path=path,
+                            target_host=remote_host,
+                            target_user=remote_user,
+                            target_path=remote_path,
+                        )
             
             elif choice == '7':
                 # Stream status
