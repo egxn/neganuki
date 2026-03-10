@@ -666,6 +666,10 @@ class IMX477Camera:
         config_format = raw_config.get("main", {}).get("format", "")
         logger.info(f"RAW config format: {config_format}")
         
+        # Ensure manual controls are applied before capture
+        logger.debug("Applying manual controls before RAW capture...")
+        self.apply_manual_controls()
+        
         # Capture data and metadata using switch_mode
         raw_arr = None
         meta = None
@@ -709,6 +713,10 @@ class IMX477Camera:
                 logger.debug("Starting camera in RAW mode...")
                 self.picam.start()
                 
+                # Apply manual controls before capture to ensure settings are active
+                logger.debug("Applying manual controls for RAW capture...")
+                self.apply_manual_controls()
+                
                 # Capture
                 logger.debug("Capturing RAW array...")
                 request = self.picam.capture_request()
@@ -727,7 +735,10 @@ class IMX477Camera:
                 preview_config = self._create_preview_config()
                 self.picam.configure(preview_config)
                 self.picam.start()
-                logger.info("Camera restored to preview mode")
+                # Reapply manual controls after restoring preview mode
+                logger.debug("Reapplying manual controls after preview restore...")
+                self.apply_manual_controls()
+                logger.info("Camera restored to preview mode with manual controls")
                 
             except Exception as e:
                 logger.error("Manual RAW capture failed: %s", e, exc_info=True)
@@ -739,7 +750,9 @@ class IMX477Camera:
                     preview_config = self._create_preview_config()
                     self.picam.configure(preview_config)
                     self.picam.start()
-                    logger.info("Preview mode restored")
+                    # Reapply manual controls after error recovery
+                    self.apply_manual_controls()
+                    logger.info("Preview mode restored with manual controls")
                 except Exception as restore_error:
                     logger.error("Failed to restore preview mode: %s", restore_error)
                     

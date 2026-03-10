@@ -565,6 +565,29 @@ def main():
                 key, value = part.split('=', 1)
                 controls_map[key.strip()] = value.strip()
 
+        typed_controls = {
+            'ae_enable': bool(args.ae_enable) if args.ae_enable is not None else None,
+            'exposure_time': args.exposure_time,
+            'awb_enable': bool(args.awb_enable) if args.awb_enable is not None else None,
+            'r_gain': args.r_gain,
+            'b_gain': args.b_gain,
+            'brightness': args.brightness,
+            'contrast': args.contrast,
+            'sharpness': args.sharpness,
+            'saturation': args.saturation,
+        }
+
+        for key, value in controls_map.items():
+            if key in ['ae_enable', 'awb_enable']:
+                typed_controls[key] = value.lower() in ('1', 'true', 'yes', 'on')
+            elif key == 'exposure_time':
+                typed_controls[key] = int(value)
+            elif key in ['r_gain', 'b_gain', 'brightness', 'contrast', 'sharpness', 'saturation']:
+                typed_controls[key] = float(value)
+            else:
+                # Keep unknown keys as raw strings to preserve forward compatibility.
+                typed_controls[key] = value
+
         if args.action == 'scan':
             # Full scan workflow
             print("\n=== Starting Full Scan ===\n")
@@ -656,32 +679,13 @@ def main():
             if not args.preset_name:
                 print("✗ --preset-name is required for action=preset-create")
                 sys.exit(2)
-            if not controls_map:
-                print("✗ --controls is required for action=preset-create")
+            preset_controls = {k: v for k, v in typed_controls.items() if v is not None}
+            if not preset_controls:
+                print("✗ preset-create requires at least one control via flags or --controls")
                 sys.exit(2)
-            client.create_camera_preset(args.preset_name, controls_map)
+            client.create_camera_preset(args.preset_name, preset_controls)
 
         elif args.action == 'set-controls':
-            typed_controls = {
-                'ae_enable': bool(args.ae_enable) if args.ae_enable is not None else None,
-                'exposure_time': args.exposure_time,
-                'awb_enable': bool(args.awb_enable) if args.awb_enable is not None else None,
-                'r_gain': args.r_gain,
-                'b_gain': args.b_gain,
-                'brightness': args.brightness,
-                'contrast': args.contrast,
-                'sharpness': args.sharpness,
-                'saturation': args.saturation,
-            }
-
-            for key, value in controls_map.items():
-                if key in ['ae_enable', 'awb_enable']:
-                    typed_controls[key] = value.lower() in ('1', 'true', 'yes', 'on')
-                elif key == 'exposure_time':
-                    typed_controls[key] = int(value)
-                elif key in ['r_gain', 'b_gain', 'brightness', 'contrast', 'sharpness', 'saturation']:
-                    typed_controls[key] = float(value)
-
             client.set_camera_controls(**typed_controls)
 
         elif args.action == 'preview':

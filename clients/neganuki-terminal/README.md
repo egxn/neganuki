@@ -96,7 +96,7 @@ poetry run python clients/neganuki-terminal/scanner_client.py --action <action> 
 - `preset-get`: Show active preset + effective controls
 - `preset-list`: List available presets
 - `preset-set`: Activate preset (`--preset-name` required)
-- `preset-create`: Create preset (`--preset-name`, `--controls` required)
+- `preset-create`: Create preset (`--preset-name` + at least one control via flags or `--controls`)
 - `set-controls`: Apply direct control values
 - `preview`: Save preview stream frames as JPEG
 - `copy`: Copy an existing file with `scp` (`--path` required)
@@ -171,6 +171,10 @@ poetry run python clients/neganuki-terminal/scanner_client.py --action <action> 
 - `--sharpness` (float, optional)
 - `--saturation` (float, optional)
 
+Preset note:
+- Every preset parameter can be passed as dedicated flags (`--exposure-time`, `--brightness`, `--contrast`, etc.) when using `--action preset-create`.
+- You can also mix dedicated flags and `--controls`; explicit flags and parsed values are merged into the preset payload.
+
 #### Preview streaming
 
 - `--fps` (int, default: `10`)
@@ -198,7 +202,16 @@ poetry run python clients/neganuki-terminal/scanner_client.py --action preset-se
 poetry run python clients/neganuki-terminal/scanner_client.py \
   --action preset-create \
   --preset-name custom \
-  --controls "exposure_time=9000,brightness=0.1,contrast=1.1"
+  --exposure-time 9000 \
+  --brightness 0.1 \
+  --contrast 1.1
+
+# Create preset using mixed input (flags + --controls)
+poetry run python clients/neganuki-terminal/scanner_client.py \
+  --action preset-create \
+  --preset-name mixed \
+  --exposure-time 9000 \
+  --controls "sharpness=1.2,saturation=0.1"
 
 # Set direct controls
 poetry run python clients/neganuki-terminal/scanner_client.py \
@@ -214,6 +227,16 @@ poetry run python clients/neganuki-terminal/scanner_client.py \
   --quality 75 \
   --preview-dir output/preview \
   --max-frames 50
+
+# Connect to a remote scanner and save preview frames
+poetry run python clients/neganuki-terminal/scanner_client.py \
+  --host 192.168.1.100 \
+  --port 50051 \
+  --action preview \
+  --fps 10 \
+  --quality 75 \
+  --preview-dir output/preview_remote \
+  --max-frames 100
 ```
 
 ## interactive_scanner.py
