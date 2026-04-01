@@ -7,7 +7,7 @@ readme = "README.md"
 packages = [{ include = "backend" }]
 
 [tool.poetry.dependencies]
-python = ">=3.11,<3.13"
+python = ">=3.11,<3.14"
 
 # Image / RAW
 tifffile = "^2025.10.16"               # TIFF 16-bit support (BigTIFF etc.).
@@ -27,9 +27,9 @@ transitions = "^0.9.3"
 grpcio = "^1.76.0"
 grpcio-tools = "^1.76.0"
 
-# Motor control. For Debian Trixie on Raspberry Pi 3B, prefer the system
-# package `python3-rpi.gpio`; keep `rpi-lgpio` for venv-based setups that also
-# provide `lgpio`.
+# Motor control. rpi-lgpio provides the RPi.GPIO API wrapping lgpio.
+# lgpio is supplied by the system package python3-lgpio (installed via
+# setup-system-deps.sh); the Poetry venv inherits it through system-site-packages.
 rpi-lgpio = "^0.6"
 
 # Camera libs (IMX477 via libcamera)
