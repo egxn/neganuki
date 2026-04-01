@@ -1,16 +1,21 @@
 """Simple stitching experiment runner.
 
 This script loads all images under ``data/sample`` (sorted alphabetically),
-rotates each frame by -90 degrees, aligns them using a selectable backend,
+optionally rotates each frame, aligns them using a selectable backend,
 and saves a stitched composite into ``output``.
 
 Usage:
     poetry run python -m decoupled_algorithms.scan --method ecc
+    poetry run python -m decoupled_algorithms.scan --method ecc --rotate -90
 
 Methods:
     - ecc   (default): Enhanced Correlation Coefficient alignment
     - orb   : ORB feature matching + homography
     - sift  : SIFT feature matching + homography (requires OpenCV with contrib)
+
+Rotation:
+    Pass --rotate <degrees> to rotate each frame before alignment.
+    Valid values: 0 (no rotation), 90, -90 (default), 180.
 """
 from __future__ import annotations
 
@@ -50,8 +55,20 @@ def _load_images(data_dir: Path) -> List[np.ndarray]:
     return images
 
 
-def _rotate_minus_90(image: np.ndarray) -> np.ndarray:
-    return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+# Maps rotation degrees to (forward cv2 code, inverse cv2 code).
+_ROTATE_MAP: dict[int, tuple[int, int]] = {
+    90:  (cv2.ROTATE_90_CLOCKWISE,        cv2.ROTATE_90_COUNTERCLOCKWISE),
+    -90: (cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_90_CLOCKWISE),
+    180: (cv2.ROTATE_180,                 cv2.ROTATE_180),
+}
+
+
+def _rotate_frame(image: np.ndarray, degrees: int) -> np.ndarray:
+    """Rotate *image* by *degrees* (0, 90, -90, or 180)."""
+    if degrees == 0:
+        return image
+    code, _ = _ROTATE_MAP[degrees]
+    return cv2.rotate(image, code)
 
 
 def _align_ecc(
@@ -215,12 +232,15 @@ def run(
     method: str = "ecc",
     *,
     log_level: str | None = None,
+    rotate: int = -90,
     ecc_max_iter: int | None = None,
     ecc_epsilon: float | None = None,
 ) -> Path:
     method = method.lower()
     if method not in ALIGNERS:
         raise ValueError(f"Unknown method '{method}'. Choose from {list(ALIGNERS)}")
+    if rotate not in (0, 90, -90, 180):
+        raise ValueError(f"Invalid rotate value '{rotate}'. Choose from 0, 90, -90, 180.")
 
     if log_level:
         _configure_logging(log_level)
@@ -229,8 +249,11 @@ def run(
 
     images = _load_images(DATA_DIR)
     LOGGER.info("Loaded %d frames from %s", len(images), DATA_DIR)
-    rotated = [_rotate_minus_90(img) for img in images]
-    LOGGER.info("Applied -90 degree rotation to all frames")
+    rotated = [_rotate_frame(img, rotate) for img in images]
+    if rotate != 0:
+        LOGGER.info("Applied %d degree rotation to all frames", rotate)
+    else:
+        LOGGER.info("No rotation applied to frames")
 
     base = rotated[0]
     warp_matrices: List[np.ndarray] = [np.eye(3, dtype=np.float32)]
@@ -310,12 +333,14 @@ def run(
     stitched = _average_composite(warped_images, masks)
     LOGGER.info("Composite generated from %d aligned frames", len(warped_images))
 
-    stitched = cv2.rotate(stitched, cv2.ROTATE_90_CLOCKWISE)
-    LOGGER.info(
-        "Restored stitched image to original orientation (%dx%d)",
-        stitched.shape[1],
-        stitched.shape[0],
-    )
+    if rotate != 0:
+        _, inv_code = _ROTATE_MAP[rotate]
+        stitched = cv2.rotate(stitched, inv_code)
+        LOGGER.info(
+            "Restored stitched image to original orientation (%dx%d)",
+            stitched.shape[1],
+            stitched.shape[0],
+        )
 
     timestamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = OUTPUT_DIR / f"neganuki_{method}_{timestamp}.tiff"
@@ -337,6 +362,13 @@ def main() -> None:
         help="Logging verbosity",
     )
     parser.add_argument(
+        "--rotate",
+        type=int,
+        choices=[0, 90, -90, 180],
+        default=-90,
+        help="Degrees to rotate each frame before alignment (default: -90). Use 0 to skip rotation.",
+    )
+    parser.add_argument(
         "--ecc-max-iter",
         type=int,
         default=750,
@@ -353,6 +385,7 @@ def main() -> None:
     run(
         args.method,
         log_level=args.log_level,
+        rotate=args.rotate,
         ecc_max_iter=args.ecc_max_iter,
         ecc_epsilon=args.ecc_epsilon,
     )

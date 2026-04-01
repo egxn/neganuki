@@ -106,6 +106,10 @@ For optional dependencies:
 poetry install --extras "camera gpio"
 ```
 
+For Raspberry Pi GPIO support, this project uses the Poetry package `rpi-lgpio`.
+In the code, this is used through the compatible `RPi.GPIO` import provided by
+that package.
+
 ---
 
 ## Generating gRPC Code
@@ -577,6 +581,12 @@ poetry shell
 
 # Reinstall dependencies
 poetry install --sync
+
+# Install Raspberry Pi GPIO support for this project
+poetry install --extras "gpio"
+
+# Or add it explicitly to Poetry
+poetry add rpi-lgpio
 ```
 
 ### gRPC connection refused

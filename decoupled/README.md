@@ -38,6 +38,7 @@ poetry run python -m decoupled_algorithms.scan --method ecc --log-level info
 
 - `--method {ecc,orb,sift}`: choose the alignment backend (default `ecc`).
 - `--log-level {critical,error,warning,info,debug}`: control logging verbosity.
+- `--rotate {0,90,-90,180}`: degrees to rotate each frame before alignment (default `-90`). Use `0` to skip rotation.
 - `--ecc-max-iter <int>` / `--ecc-epsilon <float>`: tune ECC convergence when using the ECC backend.
 
 Outputs are saved as `output/neganuki_<method>_<timestamp>.tiff` with a dynamic
