@@ -27,10 +27,9 @@ transitions = "^0.9.3"
 grpcio = "^1.76.0"
 grpcio-tools = "^1.76.0"
 
-# Motor control. rpi-lgpio provides the RPi.GPIO API wrapping lgpio.
-# lgpio is supplied by the system package python3-lgpio (installed via
-# setup-system-deps.sh); the Poetry venv inherits it through system-site-packages.
-rpi-lgpio = "^0.6"
+# Motor control. RPi.GPIO is provided by the system package python3-rpi.gpio
+# (installed via setup-system-deps.sh). The Poetry venv inherits it through
+# system-site-packages so no pip package is needed here.
 
 # Camera libs (IMX477 via libcamera)
 picamera2 = { version = "^0.3.16", optional = true }
@@ -64,6 +63,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 generate-protos = "backend.grpc.codegen:run"
+neganuki-server = "backend.grpc.launcher:main"
 
 [tool.commitizen]
 name = "cz_conventional_commits"

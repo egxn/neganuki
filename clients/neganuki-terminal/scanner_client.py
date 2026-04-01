@@ -393,17 +393,29 @@ class ScannerClient:
             print("✗ Could not detect SSH client host. Use --copy-host.")
             return False
 
-        remote = f"{target_user + '@' if target_user else ''}{host}:{target_path}"
-        cmd = ['scp', '-p', str(source), remote]
+        user_prefix = f"{target_user}@" if target_user else ""
+        remote = f"{user_prefix}{host}:{target_path}"
+        cmd = ['scp', '-p', '-v', str(source), remote]
+
+        # Best-effort: create the destination directory on the remote host first.
+        mkdir_cmd = ['ssh', f"{user_prefix}{host}", f"mkdir -p {target_path}"]
+        try:
+            subprocess.run(mkdir_cmd, check=False, capture_output=True)
+        except Exception:
+            pass  # Non-fatal; scp will fail with a clear message if the dir is missing.
 
         try:
-            print(f"Copying to {remote} ...")
-            completed = subprocess.run(cmd, check=False)
+            print(f"Copying {source.name} to {remote} ...")
+            completed = subprocess.run(cmd, check=False, capture_output=True, text=True)
             if completed.returncode == 0:
-                print("✓ File copied successfully")
+                print(f"✓ File copied successfully → {remote}")
                 return True
 
-            print(f"✗ scp failed with exit code {completed.returncode}")
+            print(f"✗ scp failed (exit code {completed.returncode})")
+            if completed.stderr:
+                # Print only the last few lines of verbose output — the error is at the end.
+                error_lines = [l for l in completed.stderr.splitlines() if not l.startswith("debug1:")]
+                print("\n".join(error_lines[-10:]))
             return False
         except Exception as e:
             print(f"✗ Copy failed: {e}")
