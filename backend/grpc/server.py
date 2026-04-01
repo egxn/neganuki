@@ -133,8 +133,9 @@ class ScannerServiceImpl:
                         self.logger.error("Camera capture itself failed, no raw data available")
                     return False, "", "RAW capture failed - no file saved"
                 
-                self.logger.info(f"✓ RAW frame captured successfully: {result['dng_path']}")
-                return True, result['dng_path'], "RAW frame captured"
+                abs_path = str(Path(result['dng_path']).resolve())
+                self.logger.info(f"✓ RAW frame captured successfully: {abs_path}")
+                return True, abs_path, "RAW frame captured"
             else:
                 # Capture preview frame
                 self.logger.info("Starting RGB frame capture...")
@@ -146,8 +147,9 @@ class ScannerServiceImpl:
                 
                 self.logger.debug("Frame captured: shape=%s, dtype=%s", frame.shape, frame.dtype)
                 out_path = _save_frame_as_png(frame, self.controller.output_dir, prefix="capture")
-                self.logger.info(f"✓ RGB frame saved to: {out_path}")
-                return True, out_path, "Frame captured"
+                abs_path = str(Path(out_path).resolve())
+                self.logger.info(f"✓ RGB frame saved to: {abs_path}")
+                return True, abs_path, "Frame captured"
                 
         except Exception as e:
             self.logger.error(f"CaptureFrame failed with exception: {e}", exc_info=True)
