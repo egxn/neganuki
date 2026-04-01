@@ -78,7 +78,8 @@ def _start_mjpeg_server(grpc_port: int, http_port: int, fps: int, quality: int) 
 
     reader_thread = threading.Thread(
         target=mp._grpc_reader,
-        args=("localhost", grpc_port, fps, quality),
+        # max_retries=0 → infinite retries when running embedded (launcher manages lifetime)
+        args=("localhost", grpc_port, fps, quality, 0),
         daemon=True,
         name="mjpeg-grpc-reader",
     )

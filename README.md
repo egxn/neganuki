@@ -138,13 +138,52 @@ poetry run generate-protos
 
 ## Running the Backend
 
-Start the gRPC server:
+Start the gRPC server and the MJPEG live preview with a single command:
 
 ```bash
-poetry run python backend/grpc/server.py
+poetry run neganuki-server
 ```
 
-The server will start on `localhost:50051` by default.
+This starts:
+- **gRPC server** on `0.0.0.0:50051`
+- **MJPEG preview** at `http://<pi-ip>:8080/` (open in any browser)
+
+Custom ports / options:
+
+```bash
+poetry run neganuki-server --host 0.0.0.0 --port 50051 --http-port 8080
+```
+
+Disable the browser preview:
+
+```bash
+poetry run neganuki-server --no-preview
+```
+
+---
+
+## Capturing and Copying Photos to Your PC
+
+Run from your PC (not the Pi). Requires SSH access to the Pi.
+
+```bash
+poetry run python clients/neganuki-terminal/scanner_client.py \
+  --host 192.168.1.13 \
+  --action capture --raw \
+  --copy-to-host \
+  --copy-user <pi-username> \
+  --copy-path ~/neganuki/
+```
+
+| Option | Description |
+|--------|-------------|
+| `--host` | Pi's IP address |
+| `--raw` | Capture RAW TIFF instead of RGB preview |
+| `--copy-to-host` | Pull the file to your PC via scp after capture |
+| `--copy-user` | SSH username on the Pi |
+| `--copy-path` | Local destination folder on your PC |
+
+Omit `--raw` to capture an RGB frame instead.
 
 ---
 

@@ -401,14 +401,13 @@ class ScannerClient:
 
         try:
             print(f"Pulling {Path(file_path).name} from {remote_src} → {local_dest} ...")
-            completed = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            print(f"  cmd: scp -p {remote_src} {local_dest}")
+            completed = subprocess.run(cmd, check=False)
             if completed.returncode == 0:
                 print(f"✓ File saved to {local_dest / Path(file_path).name}")
                 return True
 
             print(f"✗ scp failed (exit code {completed.returncode})")
-            if completed.stderr:
-                print(completed.stderr.strip())
             return False
         except Exception as e:
             print(f"✗ Copy failed: {e}")

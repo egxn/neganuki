@@ -17,6 +17,8 @@ No extra dependencies — uses only stdlib http.server + threading.
 
 import argparse
 import logging
+import os
+import signal
 import sys
 import threading
 import time
@@ -50,32 +52,58 @@ BOUNDARY = b"--mjpegboundary"
 # ── gRPC streaming thread ─────────────────────────────────────────────────────
 
 
-def _grpc_reader(grpc_host: str, grpc_port: int, fps: int, quality: int) -> None:
-    """Continuously pull frames from the gRPC server and store the latest one."""
+def _grpc_reader(grpc_host: str, grpc_port: int, fps: int, quality: int,
+                 max_retries: int = 5) -> None:
+    """Continuously pull frames from the gRPC server and store the latest one.
+
+    Exits the process if the server cannot be reached after *max_retries*
+    consecutive failed attempts (i.e. the main server was shut down).
+    Successful frames reset the retry counter.
+    """
+    import os
     global _latest_frame
     address = f"{grpc_host}:{grpc_port}"
+    consecutive_failures = 0
 
     while True:
-        log.info("Connecting to gRPC server at %s …", address)
+        log.info("Connecting to gRPC server at %s … (attempt %d/%d)",
+                 address, consecutive_failures + 1, max_retries)
         try:
             channel = grpc.insecure_channel(address)
             stub = scanner_pb2_grpc.ScannerServiceStub(channel)
             request = scanner_pb2.PreviewRequest(fps=fps, quality=quality)
+            frames_received = 0
             for frame in stub.StreamPreview(request):
                 if frame.image_data:
                     with _lock:
                         _latest_frame = bytes(frame.image_data)
                     _frame_event.set()
                     _frame_event.clear()
+                    frames_received += 1
+                    if frames_received == 1:
+                        # Reset counter once we get at least one good frame.
+                        consecutive_failures = 0
         except grpc.RpcError as exc:
             log.warning("gRPC stream lost (%s). Retrying in 2 s …", exc.details())
+            consecutive_failures += 1
         except Exception as exc:
             log.warning("Unexpected error in gRPC reader: %s. Retrying in 2 s …", exc)
+            consecutive_failures += 1
         finally:
             try:
                 channel.close()
             except Exception:
                 pass
+
+        if consecutive_failures >= max_retries:
+            log.error(
+                "Could not reach gRPC server after %d attempts. "
+                "Main server appears to be down — shutting down MJPEG preview.",
+                max_retries,
+            )
+            os.kill(os.getpid(), signal.SIGTERM)
+            return
+
         time.sleep(2)
 
 
