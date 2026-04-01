@@ -27,7 +27,9 @@ transitions = "^0.9.3"
 grpcio = "^1.76.0"
 grpcio-tools = "^1.76.0"
 
-# Motor control (choose 1 depending on your final setup)
+# Motor control. For Debian Trixie on Raspberry Pi 3B, prefer the system
+# package `python3-rpi.gpio`; keep `rpi-lgpio` for venv-based setups that also
+# provide `lgpio`.
 rpi-lgpio = "^0.6"
 
 # Camera libs (IMX477 via libcamera)

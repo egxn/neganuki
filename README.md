@@ -106,9 +106,13 @@ For optional dependencies:
 poetry install --extras "camera gpio"
 ```
 
-For Raspberry Pi GPIO support, this project uses the Poetry package `rpi-lgpio`.
-In the code, this is used through the compatible `RPi.GPIO` import provided by
-that package.
+For GPIO access, the code imports `RPi.GPIO`.
+
+On Raspberry Pi 3B with Debian Trixie, the safest option is the Debian package
+`python3-rpi.gpio`, which also exposes `RPi.GPIO`.
+
+If you prefer `rpi-lgpio`, note that it depends on `lgpio` and must not be
+installed in the same Python environment as `rpi-gpio` / `RPi.GPIO`.
 
 ---
 
@@ -490,7 +494,8 @@ poetry export -f requirements.txt --output requirements.txt --without-hashes
 * The backend is designed to run headless (no UI required)
 * Control everything via gRPC from any client
 * The pipeline is modular and extensible
-* Built for Raspberry Pi OS Bookworm with `rpi-lgpio`
+* Built around the `RPi.GPIO` API so it can run with either `python3-rpi.gpio`
+  or `rpi-lgpio`, depending on the target image
 * Supports both preview (RGB) and RAW (Bayer) capture modes
 * State machine configuration in YAML for easy customization
 * Automatic error recovery for camera and motor failures
@@ -588,6 +593,28 @@ poetry install --extras "gpio"
 # Or add it explicitly to Poetry
 poetry add rpi-lgpio
 ```
+
+### Raspberry Pi 3B on Debian Trixie
+```bash
+# Recommended on Debian Trixie / Python 3.13
+sudo apt install python3-rpi.gpio
+```
+
+The project imports `RPi.GPIO`, so `python3-rpi.gpio` works without code
+changes on a real Raspberry Pi.
+
+If you use `rpi-lgpio` instead:
+
+```bash
+# rpi-lgpio needs lgpio too
+sudo apt install python3-lgpio
+pip install rpi-lgpio
+```
+
+Do not install `rpi-lgpio` and `rpi-gpio` in the same Python environment.
+If you run inside a Poetry virtualenv, remember that system packages such as
+`python3-rpi.gpio` are not visible unless that virtualenv is configured to use
+system site packages.
 
 ### gRPC connection refused
 ```bash

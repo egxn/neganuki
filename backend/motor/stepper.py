@@ -1,12 +1,44 @@
 import logging
+import os
+from pathlib import Path
+import sys
 import time
 
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO  # type: ignore[import-not-found]
+    GPIO_IMPORT_ERROR = None
+except Exception as exc:
+    GPIO = None
+    GPIO_IMPORT_ERROR = exc
+
+
+class _MockGPIO:
+    """Minimal RPi.GPIO-compatible shim for non-Raspberry Pi development."""
+
+    BCM = "BCM"
+    OUT = "OUT"
+    LOW = 0
+    HIGH = 1
+
+    def setwarnings(self, _enabled):
+        return None
+
+    def setmode(self, _mode):
+        return None
+
+    def setup(self, _pin, _direction, initial=LOW):
+        return initial
+
+    def output(self, _pin, _value):
+        return None
+
+    def cleanup(self, _pins=None):
+        return None
 
 
 class Stepper28BYJ48:
     """
-    28BYJ-48 stepper motor controller using rpi-lgpio via the RPi.GPIO API.
+    28BYJ-48 stepper motor controller using an RPi.GPIO-compatible backend.
     Compatible with ULN2003 driver and Raspberry Pi 3B.
 
     Features:
@@ -30,6 +62,11 @@ class Stepper28BYJ48:
 
     # Motor specifications (internal gear ratio 64:1)
     STEPS_PER_REV = 4096
+    _SIMULATION_ENV_VAR = "NEGANUKI_SIMULATE_GPIO"
+    _DEVICE_TREE_MODEL_PATHS = (
+        Path("/proc/device-tree/model"),
+        Path("/sys/firmware/devicetree/base/model"),
+    )
 
     def __init__(self, pins=(17, 18, 27, 22), delay=0.002):
         """
@@ -45,9 +82,69 @@ class Stepper28BYJ48:
         self.step_count = len(self.HALF_STEP_SEQ)
         self.current_step = 0
         self.total_steps = 0  # Absolute position tracking
+        self.simulated = False
+        self.is_raspberry_pi = self._detect_raspberry_pi()
+        self.gpio = self._resolve_gpio_backend()
 
         # Initialize GPIO
         self._initialize_gpio()
+
+    def _resolve_gpio_backend(self):
+        simulate_gpio = os.getenv(self._SIMULATION_ENV_VAR, "").strip().lower()
+        force_simulation = simulate_gpio in {"1", "true", "yes", "on"}
+
+        if force_simulation:
+            self.simulated = True
+            self.log.warning(
+                "Using simulated GPIO because %s is enabled",
+                self._SIMULATION_ENV_VAR,
+            )
+            return _MockGPIO()
+
+        if GPIO is not None:
+            return GPIO
+
+        if self.is_raspberry_pi:
+            raise RuntimeError(self._build_gpio_install_help())
+
+        self.simulated = True
+        self.log.warning(
+            "RPi.GPIO is unavailable (%s). Falling back to simulated GPIO backend.",
+            GPIO_IMPORT_ERROR,
+        )
+        self.log.warning(
+            "Motor movements will be logged but no physical GPIO pins will be driven."
+        )
+        self.log.warning(
+            "Install Raspberry Pi support with: poetry install --extras \"gpio\""
+        )
+        return _MockGPIO()
+
+    def _detect_raspberry_pi(self):
+        for model_path in self._DEVICE_TREE_MODEL_PATHS:
+            try:
+                model = model_path.read_text(encoding="utf-8", errors="ignore").strip("\x00 \n")
+            except OSError:
+                continue
+
+            if "Raspberry Pi" in model:
+                return True
+
+        return False
+
+    def _build_gpio_install_help(self):
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        import_error = GPIO_IMPORT_ERROR or "unknown import error"
+
+        return (
+            f"RPi.GPIO import failed on Raspberry Pi hardware: {import_error}. "
+            "For Raspberry Pi 3B on Debian Trixie, the safest compatible module is "
+            "'python3-rpi.gpio' from Debian, which provides the same 'RPi.GPIO' import. "
+            "If you prefer 'rpi-lgpio', install its 'lgpio' dependency too and do not "
+            "install 'rpi-gpio' and 'rpi-lgpio' in the same Python environment. "
+            f"Current Python version: {python_version}. "
+            f"Set {self._SIMULATION_ENV_VAR}=1 only if you intentionally want simulated GPIO."
+        )
 
     def _initialize_gpio(self):
         """Initialize GPIO and configure pins."""
@@ -57,14 +154,17 @@ class Stepper28BYJ48:
                 return
 
             self.log.info("Initializing GPIO in BCM mode")
-            GPIO.setwarnings(False)
-            GPIO.setmode(GPIO.BCM)
+            self.gpio.setwarnings(False)
+            self.gpio.setmode(self.gpio.BCM)
 
             for pin in self.pins:
-                GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+                self.gpio.setup(pin, self.gpio.OUT, initial=self.gpio.LOW)
 
             self.initialized = True
-            self.log.info("GPIO initialized successfully on pins %s", self.pins)
+            if self.simulated:
+                self.log.info("Simulated GPIO initialized on pins %s", self.pins)
+            else:
+                self.log.info("GPIO initialized successfully on pins %s", self.pins)
 
         except Exception as e:
             self.log.error(f"Failed to initialize GPIO: {e}")
@@ -99,7 +199,7 @@ class Stepper28BYJ48:
                 seq = self.HALF_STEP_SEQ[self.current_step]
 
                 for pin, val in zip(self.pins, seq):
-                    GPIO.output(pin, GPIO.HIGH if val else GPIO.LOW)
+                    self.gpio.output(pin, self.gpio.HIGH if val else self.gpio.LOW)
 
                 time.sleep(self.delay)
                 self.total_steps += direction
@@ -148,7 +248,7 @@ class Stepper28BYJ48:
 
         try:
             for pin in self.pins:
-                GPIO.output(pin, GPIO.LOW)
+                self.gpio.output(pin, self.gpio.LOW)
             self.log.info("Motor stopped (all coils off)")
             return True
         except Exception as e:
@@ -167,7 +267,7 @@ class Stepper28BYJ48:
         try:
             seq = self.HALF_STEP_SEQ[self.current_step]
             for pin, val in zip(self.pins, seq):
-                GPIO.output(pin, GPIO.HIGH if val else GPIO.LOW)
+                self.gpio.output(pin, self.gpio.HIGH if val else self.gpio.LOW)
             self.log.debug("Motor holding position")
             return True
         except Exception as e:
@@ -206,12 +306,12 @@ class Stepper28BYJ48:
 
         for pin in self.pins:
             try:
-                GPIO.output(pin, GPIO.LOW)
+                self.gpio.output(pin, self.gpio.LOW)
             except Exception as e:
                 self.log.warning(f"Failed to turn off pin {pin}: {e}")
 
         try:
-            GPIO.cleanup(self.pins)
+            self.gpio.cleanup(self.pins)
             self.initialized = False
             self.log.info("Stepper cleaned up successfully")
         except Exception as e:
