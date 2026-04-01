@@ -69,9 +69,9 @@ except Exception:
 CONTROL_PRESETS: Dict[str, Dict[str, Any]] = {
     "default": {
         "AeEnable": False,
-        "ExposureTime": 10000,  # 10ms
+        "ExposureTime": 10000,
         "AwbEnable": False,
-        "ColourGains": (2.2, 1.6),  # Warmer - more red/blue vs green
+        "ColourGains": (1.4, 1.9),  
         "Brightness": 0.0,
         "Contrast": 1.0,
         "Sharpness": 0.0,

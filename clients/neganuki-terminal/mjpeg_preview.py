@@ -17,6 +17,7 @@ No extra dependencies — uses only stdlib http.server + threading.
 
 import argparse
 import logging
+import mimetypes
 import os
 import signal
 import sys
@@ -46,6 +47,7 @@ log = logging.getLogger("MJPEGPreview")
 _lock = threading.Lock()
 _latest_frame: bytes | None = None          # raw JPEG bytes
 _frame_event = threading.Event()            # signals that a new frame arrived
+_output_dir: Path = Path("./output")        # directory to list/serve for download
 
 BOUNDARY = b"--mjpegboundary"
 
@@ -118,17 +120,39 @@ _INDEX_HTML = """\
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Neganuki live preview</title>
   <style>
-    body { margin: 0; background: #111; display: flex; flex-direction: column;
-           align-items: center; justify-content: center; min-height: 100vh; }
-    h1   { color: #eee; font-family: sans-serif; margin-bottom: 1rem; }
-    img  { max-width: 100%; border: 2px solid #444; border-radius: 4px; }
-    p    { color: #888; font-family: sans-serif; font-size: 0.85rem; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #111; color: #eee; font-family: sans-serif;
+           display: flex; flex-direction: column; align-items: center;
+           min-height: 100vh; padding: 1rem; }
+    h1   { margin-bottom: 0.5rem; }
+    img  { max-width: 100%; border: 2px solid #444; border-radius: 4px; margin-bottom: 1.5rem; }
+    h2   { align-self: flex-start; margin: 0.5rem 0; }
+    table { width: 100%; border-collapse: collapse; max-width: 900px; }
+    th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid #333; }
+    th { background: #222; }
+    a  { color: #7af; }
+    p  { color: #888; font-size: 0.85rem; }
   </style>
 </head>
 <body>
-  <h1>Neganuki — live preview</h1>
+  <h1>Neganuki &mdash; live preview</h1>
   <img src="/stream" alt="live preview">
-  <p>Refresh the page if the stream does not start.</p>
+  <h2>Captured files</h2>
+  <table id="files"><tr><td>Loading...</td></tr></table>
+  <p>Refresh the page to update the file list.</p>
+  <script>
+    fetch('/files')
+      .then(r => r.json())
+      .then(files => {
+        const t = document.getElementById('files');
+        if (!files.length) { t.innerHTML = '<tr><td>No files yet.</td></tr>'; return; }
+        t.innerHTML = '<tr><th>File</th><th>Size</th><th>Download</th></tr>' +
+          files.map(f =>
+            '<tr><td>' + f.name + '</td><td>' + f.size + '</td>' +
+            '<td><a href="/download/' + encodeURIComponent(f.name) + '" download>' + f.name + '</a></td></tr>'
+          ).join('');
+      });
+  </script>
 </body>
 </html>
 """
@@ -146,8 +170,59 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             self._send_index()
         elif self.path == "/stream":
             self._send_mjpeg_stream()
+        elif self.path == "/files":
+            self._send_file_list()
+        elif self.path.startswith("/download/"):
+            self._send_file(self.path[len("/download/"):])
         else:
             self.send_error(404, "Not found")
+
+    def _send_json(self, data: str):
+        body = data.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_file_list(self):
+        import json
+        entries = []
+        if _output_dir.is_dir():
+            for f in sorted(_output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                if f.is_file():
+                    size = f.stat().st_size
+                    if size >= 1_048_576:
+                        size_str = f"{size / 1_048_576:.1f} MB"
+                    elif size >= 1024:
+                        size_str = f"{size / 1024:.0f} KB"
+                    else:
+                        size_str = f"{size} B"
+                    entries.append({"name": f.name, "size": size_str})
+        self._send_json(json.dumps(entries))
+
+    def _send_file(self, filename: str):
+        from urllib.parse import unquote
+        filename = unquote(filename)
+        # Prevent path traversal.
+        file_path = (_output_dir / filename).resolve()
+        if not str(file_path).startswith(str(_output_dir.resolve())):
+            self.send_error(403, "Forbidden")
+            return
+        if not file_path.is_file():
+            self.send_error(404, "Not found")
+            return
+        mime, _ = mimetypes.guess_type(str(file_path))
+        mime = mime or "application/octet-stream"
+        size = file_path.stat().st_size
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(size))
+        self.send_header("Content-Disposition", f'attachment; filename="{file_path.name}"')
+        self.end_headers()
+        with open(file_path, "rb") as fh:
+            while chunk := fh.read(65536):
+                self.wfile.write(chunk)
 
     def _send_index(self):
         body = _INDEX_HTML.encode("utf-8")
@@ -241,7 +316,13 @@ def main() -> None:
                         help="Requested preview FPS (default: 10)")
     parser.add_argument("--quality", type=int, default=75,
                         help="JPEG quality 1-100 (default: 75)")
+    parser.add_argument("--output-dir", default="./output",
+                        help="Directory to list and serve for download (default: ./output)")
     args = parser.parse_args()
+
+    global _output_dir
+    _output_dir = Path(args.output_dir).expanduser().resolve()
+    log.info("Serving files from %s", _output_dir)
 
     # Start gRPC reader in a background daemon thread.
     t = threading.Thread(
