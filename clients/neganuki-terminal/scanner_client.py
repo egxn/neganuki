@@ -375,47 +375,40 @@ class ScannerClient:
     def copy_file_to_host(self, file_path: str, target_host: str = None,
                           target_user: str = None, target_path: str = '.'):
         """
-        Copy a local file from scanner host to a remote host via scp.
+        Pull a file FROM the scanner (Pi) TO the local machine via scp.
 
-        If target_host is not provided, SSH client host is auto-detected.
+        The file lives on the gRPC server (self.host). We pull it here so no
+        SSH keys from Pi→PC are required; only PC→Pi (which the user already has).
+
+        :param file_path:   Path of the file on the Pi.
+        :param target_host: Unused — kept for API compatibility. The source host
+                            is always self.host (the gRPC server).
+        :param target_user: SSH username for the Pi (default: current local user).
+        :param target_path: Local destination directory or path.
         """
-        source = Path(file_path)
-        if not source.exists():
-            print(f"✗ File not found: {file_path}")
-            return False
-
         if shutil.which('scp') is None:
-            print("✗ 'scp' command not found on scanner host")
+            print("✗ 'scp' command not found")
             return False
 
-        host = target_host or self.detect_ssh_client_host()
-        if not host:
-            print("✗ Could not detect SSH client host. Use --copy-host.")
-            return False
-
+        scanner_host = self.host
         user_prefix = f"{target_user}@" if target_user else ""
-        remote = f"{user_prefix}{host}:{target_path}"
-        cmd = ['scp', '-p', '-v', str(source), remote]
+        remote_src = f"{user_prefix}{scanner_host}:{file_path}"
 
-        # Best-effort: create the destination directory on the remote host first.
-        mkdir_cmd = ['ssh', f"{user_prefix}{host}", f"mkdir -p {target_path}"]
-        try:
-            subprocess.run(mkdir_cmd, check=False, capture_output=True)
-        except Exception:
-            pass  # Non-fatal; scp will fail with a clear message if the dir is missing.
+        local_dest = Path(target_path).expanduser()
+        local_dest.mkdir(parents=True, exist_ok=True)
+
+        cmd = ['scp', '-p', remote_src, str(local_dest)]
 
         try:
-            print(f"Copying {source.name} to {remote} ...")
+            print(f"Pulling {Path(file_path).name} from {remote_src} → {local_dest} ...")
             completed = subprocess.run(cmd, check=False, capture_output=True, text=True)
             if completed.returncode == 0:
-                print(f"✓ File copied successfully → {remote}")
+                print(f"✓ File saved to {local_dest / Path(file_path).name}")
                 return True
 
             print(f"✗ scp failed (exit code {completed.returncode})")
             if completed.stderr:
-                # Print only the last few lines of verbose output — the error is at the end.
-                error_lines = [l for l in completed.stderr.splitlines() if not l.startswith("debug1:")]
-                print("\n".join(error_lines[-10:]))
+                print(completed.stderr.strip())
             return False
         except Exception as e:
             print(f"✗ Copy failed: {e}")

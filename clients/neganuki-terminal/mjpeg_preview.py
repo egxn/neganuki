@@ -82,7 +82,7 @@ def _grpc_reader(grpc_host: str, grpc_port: int, fps: int, quality: int) -> None
 # ── HTTP handler ──────────────────────────────────────────────────────────────
 
 # Minimal HTML page — the <img> src points to the MJPEG stream endpoint.
-_INDEX_HTML = b"""\
+_INDEX_HTML = """\
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -122,11 +122,12 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not found")
 
     def _send_index(self):
+        body = _INDEX_HTML.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(_INDEX_HTML)))
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(_INDEX_HTML)
+        self.wfile.write(body)
 
     def _send_mjpeg_stream(self):
         self.send_response(200)
