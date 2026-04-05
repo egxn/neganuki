@@ -23,7 +23,7 @@ import signal
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 
 import grpc
@@ -478,7 +478,8 @@ def main() -> None:
     )
     t.start()
 
-    server = HTTPServer(("0.0.0.0", args.http_port), MJPEGHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", args.http_port), MJPEGHandler)
+    server.daemon_threads = True
     log.info("MJPEG preview server running at http://0.0.0.0:%d/", args.http_port)
     log.info("Open in browser: http://<pi-ip>:%d/", args.http_port)
     log.info("Press Ctrl+C to stop.")

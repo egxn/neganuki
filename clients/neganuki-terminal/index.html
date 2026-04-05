@@ -606,6 +606,34 @@ document.getElementById('btn-apply-controls').addEventListener('click', function
     .finally(() => { this.disabled = false; });
 });
 
+// ── Auto-apply exposure on slider change ─────────────────────────────────────
+
+(function () {
+  let debounceTimer = null;
+  const slider = document.getElementById('sl-exposure');
+  slider.addEventListener('input', function () {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const body = {
+        ae_enable:     document.getElementById('ae-enable').checked,
+        exposure_time: parseInt(this.value, 10),
+        awb_enable:    document.getElementById('awb-enable').checked,
+        r_gain:        parseFloat(document.getElementById('sl-rgain').value),
+        b_gain:        parseFloat(document.getElementById('sl-bgain').value),
+        brightness:    parseFloat(document.getElementById('sl-brightness').value),
+        contrast:      parseFloat(document.getElementById('sl-contrast').value),
+        sharpness:     parseFloat(document.getElementById('sl-sharpness').value),
+        saturation:    parseFloat(document.getElementById('sl-saturation').value),
+      };
+      api('/api/camera/controls', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      });
+    }, 300);
+  });
+})();
+
 // ── Exposure meter ───────────────────────────────────────────────────────────
 
 (function () {
