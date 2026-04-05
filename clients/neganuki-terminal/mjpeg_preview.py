@@ -51,6 +51,12 @@ _output_dir: Path = Path("./output")        # directory to list/serve for downlo
 
 BOUNDARY = b"--mjpegboundary"
 
+# ── Shared gRPC control stub (for unary control RPCs) ────────────────────────
+
+_grpc_channel = None                        # persistent channel for control calls
+_ctrl_stub: scanner_pb2_grpc.ScannerServiceStub | None = None
+_ctrl_lock = threading.Lock()               # protects _ctrl_stub access
+
 # ── gRPC streaming thread ─────────────────────────────────────────────────────
 
 
@@ -111,59 +117,29 @@ def _grpc_reader(grpc_host: str, grpc_port: int, fps: int, quality: int,
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────
 
-# Minimal HTML page — the <img> src points to the MJPEG stream endpoint.
-_INDEX_HTML = """\
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Neganuki live preview</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; background: #111; color: #eee; font-family: sans-serif;
-           display: flex; flex-direction: column; align-items: center;
-           min-height: 100vh; padding: 1rem; }
-    h1   { margin-bottom: 0.5rem; }
-    img  { max-width: 100%; border: 2px solid #444; border-radius: 4px; margin-bottom: 1.5rem; }
-    h2   { align-self: flex-start; margin: 0.5rem 0; }
-    table { width: 100%; border-collapse: collapse; max-width: 900px; }
-    th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid #333; }
-    th { background: #222; }
-    a  { color: #7af; }
-    p  { color: #888; font-size: 0.85rem; }
-  </style>
-</head>
-<body>
-  <h1>Neganuki &mdash; live preview</h1>
-  <img src="/stream" alt="live preview">
-  <h2>Captured files</h2>
-  <table id="files"><tr><td>Loading...</td></tr></table>
-  <p>Refresh the page to update the file list.</p>
-  <script>
-    fetch('/files')
-      .then(r => r.json())
-      .then(files => {
-        const t = document.getElementById('files');
-        if (!files.length) { t.innerHTML = '<tr><td>No files yet.</td></tr>'; return; }
-        t.innerHTML = '<tr><th>File</th><th>Size</th><th>Download</th></tr>' +
-          files.map(f =>
-            '<tr><td>' + f.name + '</td><td>' + f.size + '</td>' +
-            '<td><a href="/download/' + encodeURIComponent(f.name) + '" download>' + f.name + '</a></td></tr>'
-          ).join('');
-      });
-  </script>
-</body>
-</html>
-"""
+# HTML is served from index.html alongside this script.
+_HTML_FILE = Path(__file__).parent / "index.html"
+
+_PLACEHOLDER_HTML = b"""<!DOCTYPE html><html><body><p>index.html not found.</p></body></html>"""
+
+
+def _load_index_html() -> bytes:
+    """Read index.html from disk each request (supports live editing)."""
+    try:
+        return _HTML_FILE.read_bytes()
+    except OSError:
+        log.warning("index.html not found at %s", _HTML_FILE)
+        return _PLACEHOLDER_HTML
+
 
 
 class MJPEGHandler(BaseHTTPRequestHandler):
-    """Minimal HTTP handler — serves the HTML page and the MJPEG stream."""
+    """HTTP handler — serves the HTML page, MJPEG stream, and control API."""
 
-    # Suppress per-request log noise from BaseHTTPRequestHandler.
     def log_message(self, fmt, *args):  # noqa: N802
         pass
+
+    # ── Routing ───────────────────────────────────────────────────────────────
 
     def do_GET(self):  # noqa: N802
         if self.path in ("/", "/index.html"):
@@ -172,18 +148,180 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             self._send_mjpeg_stream()
         elif self.path == "/files":
             self._send_file_list()
+        elif self.path == "/api/status":
+            self._api_get_status()
+        elif self.path == "/api/presets":
+            self._api_list_presets()
+        elif self.path == "/api/camera":
+            self._api_get_camera()
         elif self.path.startswith("/download/"):
             self._send_file(self.path[len("/download/"):])
         else:
             self.send_error(404, "Not found")
 
-    def _send_json(self, data: str):
+    def do_POST(self):  # noqa: N802
+        if self.path == "/api/capture":
+            self._api_capture()
+        elif self.path == "/api/motor":
+            self._api_motor()
+        elif self.path == "/api/camera/controls":
+            self._api_camera_controls()
+        elif self.path == "/api/camera/preset":
+            self._api_camera_preset()
+        else:
+            self.send_error(404, "Not found")
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _read_json_body(self):
+        import json
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length > 0 else b"{}"
+        return json.loads(raw)
+
+    def _send_json(self, data: str, status: int = 200):
         body = data.encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _json_ok(self, **kwargs):
+        import json
+        kwargs.setdefault("success", True)
+        self._send_json(json.dumps(kwargs))
+
+    def _json_err(self, message: str, status: int = 200):
+        import json
+        self._send_json(json.dumps({"success": False, "message": message}), status)
+
+    def _stub(self):
+        with _ctrl_lock:
+            return _ctrl_stub
+
+    # ── GET API ───────────────────────────────────────────────────────────────
+
+    def _api_get_status(self):
+        import json
+        stub = self._stub()
+        if stub is None:
+            self._json_err("gRPC control stub not initialised")
+            return
+        try:
+            resp = stub.GetStatus(scanner_pb2.StatusRequest(), timeout=3)
+            self._send_json(json.dumps({
+                "success": True,
+                "state": resp.state,
+                "frame_count": resp.frame_count,
+                "message": resp.message,
+            }))
+        except grpc.RpcError as e:
+            self._json_err(e.details())
+
+    def _api_list_presets(self):
+        import json
+        stub = self._stub()
+        if stub is None:
+            self._json_err("gRPC control stub not initialised")
+            return
+        try:
+            resp = stub.ListCameraPresets(scanner_pb2.Empty(), timeout=3)
+            self._send_json(json.dumps({
+                "success": True,
+                "preset_names": list(resp.preset_names),
+            }))
+        except grpc.RpcError as e:
+            self._json_err(e.details())
+
+    def _api_get_camera(self):
+        import json
+        stub = self._stub()
+        if stub is None:
+            self._json_err("gRPC control stub not initialised")
+            return
+        try:
+            resp = stub.GetCameraPreset(scanner_pb2.Empty(), timeout=3)
+            self._send_json(json.dumps({
+                "success": True,
+                "preset_name": resp.preset_name,
+                "controls": dict(resp.controls),
+            }))
+        except grpc.RpcError as e:
+            self._json_err(e.details())
+
+    # ── POST API ──────────────────────────────────────────────────────────────
+
+    def _api_capture(self):
+        stub = self._stub()
+        if stub is None:
+            self._json_err("gRPC control stub not initialised")
+            return
+        try:
+            body = self._read_json_body()
+            raw = bool(body.get("raw", False))
+            resp = stub.CaptureFrame(scanner_pb2.FrameCaptureRequest(raw=raw), timeout=15)
+            self._json_ok(path=resp.path, message=resp.message)
+        except grpc.RpcError as e:
+            self._json_err(e.details())
+
+    def _api_motor(self):
+        stub = self._stub()
+        if stub is None:
+            self._json_err("gRPC control stub not initialised")
+            return
+        try:
+            body = self._read_json_body()
+            steps = int(body.get("steps", 0))
+            resp = stub.MoveMotor(scanner_pb2.MotorMoveRequest(steps=steps), timeout=30)
+            self._json_ok(message=resp.message)
+        except (ValueError, TypeError):
+            self._json_err("'steps' must be an integer")
+        except grpc.RpcError as e:
+            self._json_err(e.details())
+
+    def _api_camera_controls(self):
+        stub = self._stub()
+        if stub is None:
+            self._json_err("gRPC control stub not initialised")
+            return
+        try:
+            body = self._read_json_body()
+            req = scanner_pb2.CameraControlsRequest(
+                ae_enable=bool(body.get("ae_enable", True)),
+                exposure_time=int(body.get("exposure_time", 10000)),
+                awb_enable=bool(body.get("awb_enable", True)),
+                r_gain=float(body.get("r_gain", 1.4)),
+                b_gain=float(body.get("b_gain", 1.9)),
+                brightness=float(body.get("brightness", 0.0)),
+                contrast=float(body.get("contrast", 1.0)),
+                sharpness=float(body.get("sharpness", 1.0)),
+                saturation=float(body.get("saturation", 1.0)),
+            )
+            resp = stub.SetCameraControls(req, timeout=5)
+            self._json_ok(message=resp.message)
+        except (ValueError, TypeError) as e:
+            self._json_err(str(e))
+        except grpc.RpcError as e:
+            self._json_err(e.details())
+
+    def _api_camera_preset(self):
+        stub = self._stub()
+        if stub is None:
+            self._json_err("gRPC control stub not initialised")
+            return
+        try:
+            body = self._read_json_body()
+            name = str(body.get("preset_name", "")).strip()
+            if not name:
+                self._json_err("'preset_name' is required")
+                return
+            resp = stub.SetCameraPreset(scanner_pb2.SetPresetRequest(preset_name=name), timeout=5)
+            self._json_ok(message=resp.message)
+        except grpc.RpcError as e:
+            self._json_err(e.details())
+
+    # ── Static file serving ───────────────────────────────────────────────────
 
     def _send_file_list(self):
         import json
@@ -225,7 +363,7 @@ class MJPEGHandler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
 
     def _send_index(self):
-        body = _INDEX_HTML.encode("utf-8")
+        body = _load_index_html()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -320,9 +458,16 @@ def main() -> None:
                         help="Directory to list and serve for download (default: ./output)")
     args = parser.parse_args()
 
-    global _output_dir
+    global _output_dir, _ctrl_stub, _grpc_channel
     _output_dir = Path(args.output_dir).expanduser().resolve()
     log.info("Serving files from %s", _output_dir)
+
+    # Shared gRPC channel + stub used by the HTTP control endpoints.
+    address = f"{args.grpc_host}:{args.grpc_port}"
+    _grpc_channel = grpc.insecure_channel(address)
+    with _ctrl_lock:
+        _ctrl_stub = scanner_pb2_grpc.ScannerServiceStub(_grpc_channel)
+    log.info("Control gRPC stub connected to %s", address)
 
     # Start gRPC reader in a background daemon thread.
     t = threading.Thread(

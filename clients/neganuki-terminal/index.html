@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Neganuki live preview</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #111;
+      color: #eee;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      overflow: hidden;
+    }
+
+    /* ── Top bar ── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 1rem;
+      background: #1a1a1a;
+      border-bottom: 1px solid #2a2a2a;
+      flex-shrink: 0;
+    }
+    #topbar h1 { font-size: 1rem; font-weight: 600; letter-spacing: 0.05em; }
+    #status-badge {
+      padding: 0.2rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: #2a2a2a;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    #status-badge.idle    { background: #1a3a1a; color: #5f5; }
+    #status-badge.scanning { background: #1a2a3a; color: #5af; }
+    #status-badge.error   { background: #3a1a1a; color: #f55; }
+    #frame-count { font-size: 0.75rem; color: #666; margin-left: auto; }
+
+    /* ── Main area ── */
+    #main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Preview (70%) ── */
+    #preview-panel {
+      flex: 7;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      overflow: hidden;
+    }
+    #preview-panel img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* ── Exposure meter ── */
+    #exp-meter {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.1rem;
+      padding: 0.35rem 0 0.25rem;
+      width: 100%;
+    }
+    .meter-wrap {
+      position: relative;
+      width: 220px;
+      height: 26px;
+    }
+    .meter-labels {
+      position: absolute;
+      top: 0;
+      left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.6rem;
+      color: #555;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    /* hide half-stop labels to avoid clutter, show only full stops */
+    .meter-labels .hs { visibility: hidden; }
+    .meter-ticks {
+      position: absolute;
+      bottom: 2px;
+      left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .t-major  { width: 2px; height: 7px; background: #666; border-radius: 1px; }
+    .t-minor  { width: 1px; height: 4px; background: #3a3a3a; }
+    .t-center { width: 2px; height: 10px; background: #5f5; border-radius: 1px; }
+    .meter-track {
+      position: absolute;
+      bottom: 8px;
+      left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(
+        to right,
+        #3af 0%, #3af 40%,
+        #5f5 46%, #5f5 54%,
+        #fa5 60%, #f44 100%
+      );
+      border-radius: 1px;
+      opacity: 0.5;
+    }
+    #meter-indicator {
+      position: absolute;
+      bottom: 3px;
+      width: 0;
+      height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-bottom: 7px solid #fff;
+      transform: translateX(-50%);
+      transition: left 0.25s ease, border-bottom-color 0.25s ease;
+      filter: drop-shadow(0 0 3px rgba(255,255,255,0.6));
+    }
+    .meter-caption {
+      font-size: 0.55rem;
+      color: #444;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    /* ── Controls (30%) ── */
+    #controls-panel {
+      flex: 3;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      background: #181818;
+      border-left: 1px solid #2a2a2a;
+    }
+
+    .section {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #242424;
+    }
+    .section-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #666;
+      margin-bottom: 0.6rem;
+    }
+
+    /* ── Form elements ── */
+    label { display: block; color: #aaa; margin-bottom: 0.15rem; }
+    input[type=range] {
+      width: 100%;
+      accent-color: #7af;
+      cursor: pointer;
+    }
+    input[type=number], select {
+      width: 100%;
+      background: #222;
+      border: 1px solid #333;
+      color: #eee;
+      padding: 0.3rem 0.5rem;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    input[type=number]:focus, select:focus { outline: 1px solid #7af; border-color: #7af; }
+    input[type=checkbox] { accent-color: #7af; width: 1rem; height: 1rem; cursor: pointer; }
+
+    .row   { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .row label { margin-bottom: 0; flex: 1; white-space: nowrap; }
+    .row input[type=number] { width: 5.5rem; flex-shrink: 0; }
+    .row .value-display { width: 3.5rem; text-align: right; color: #7af; font-variant-numeric: tabular-nums; flex-shrink: 0; font-size: 0.8rem;}
+
+    .slider-row { margin-bottom: 0.5rem; }
+    .slider-row .slider-header { display: flex; justify-content: space-between; margin-bottom: 0.1rem; }
+    .slider-row .slider-header label { color: #aaa; }
+    .slider-row .slider-header span { color: #7af; font-variant-numeric: tabular-nums; font-size: 0.8rem; }
+
+    /* ── Buttons ── */
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      padding: 0.4rem 0.8rem;
+      border: none;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: #2255cc; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #3366dd; }
+    .btn-success { background: #1a7a3a; color: #fff; }
+    .btn-success:hover:not(:disabled) { background: #229944; }
+    .btn-neutral { background: #333; color: #eee; }
+    .btn-neutral:hover:not(:disabled) { background: #444; }
+    .btn-full { width: 100%; margin-top: 0.4rem; }
+    .btn-group { display: flex; gap: 0.5rem; }
+    .btn-group button { flex: 1; }
+
+    /* ── Feedback ── */
+    .feedback {
+      margin-top: 0.4rem;
+      font-size: 0.75rem;
+      color: #888;
+      min-height: 1rem;
+      word-break: break-all;
+    }
+    .feedback.ok  { color: #5f5; }
+    .feedback.err { color: #f55; }
+
+    /* ── File table ── */
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.3rem 0.4rem; border-bottom: 1px solid #222; font-size: 0.75rem; }
+    th { color: #666; font-weight: 600; }
+    a  { color: #7af; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #181818; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Top bar ─────────────────────────────────────────────────────────────── -->
+<div id="topbar">
+  <h1>Neganuki</h1>
+  <span id="status-badge">—</span>
+  <span id="frame-count"></span>
+</div>
+
+<!-- ── Main ────────────────────────────────────────────────────────────────── -->
+<div id="main">
+
+  <!-- Preview 70% -->
+  <div id="preview-panel">
+
+    <!-- Exposure meter -->
+    <div id="exp-meter">
+      <div class="meter-wrap">
+        <div class="meter-labels">
+          <span>-3</span><span class="hs"></span>
+          <span>-2</span><span class="hs"></span>
+          <span>-1</span><span class="hs"></span>
+          <span>0</span>
+          <span class="hs"></span><span>+1</span>
+          <span class="hs"></span><span>+2</span>
+          <span class="hs"></span><span>+3</span>
+        </div>
+        <div class="meter-track"></div>
+        <div class="meter-ticks">
+          <div class="t-major"></div><div class="t-minor"></div>
+          <div class="t-major"></div><div class="t-minor"></div>
+          <div class="t-major"></div><div class="t-minor"></div>
+          <div class="t-center"></div>
+          <div class="t-minor"></div><div class="t-major"></div>
+          <div class="t-minor"></div><div class="t-major"></div>
+          <div class="t-minor"></div><div class="t-major"></div>
+        </div>
+        <div id="meter-indicator"></div>
+      </div>
+      <div class="meter-caption">exposure</div>
+    </div>
+
+    <img src="/stream" alt="live preview">
+  </div>
+
+  <!-- Controls 30% -->
+  <div id="controls-panel">
+
+    <!-- Capture -->
+    <div class="section">
+      <div class="section-title">Capture</div>
+      <div class="row">
+        <label for="raw-check">Raw (DNG)</label>
+        <input type="checkbox" id="raw-check">
+      </div>
+      <button class="btn-success btn-full" id="btn-capture">&#9654; Take Photo</button>
+      <div class="feedback" id="fb-capture"></div>
+    </div>
+
+    <!-- Motor -->
+    <div class="section">
+      <div class="section-title">Motor</div>
+      <div class="row">
+        <label for="motor-steps">Steps</label>
+        <input type="number" id="motor-steps" value="100" min="1" max="4096">
+      </div>
+      <div class="btn-group">
+        <button class="btn-neutral" id="btn-backward">&#8592; Back</button>
+        <button class="btn-neutral" id="btn-forward">Forward &#8594;</button>
+      </div>
+      <div class="feedback" id="fb-motor"></div>
+    </div>
+
+    <!-- Camera preset -->
+    <div class="section">
+      <div class="section-title">Camera Preset</div>
+      <select id="preset-select"><option value="">Loading…</option></select>
+      <button class="btn-primary btn-full" id="btn-preset" style="margin-top:0.4rem">Apply Preset</button>
+      <div class="feedback" id="fb-preset"></div>
+    </div>
+
+    <!-- Camera controls -->
+    <div class="section">
+      <div class="section-title">Camera Controls</div>
+
+      <div class="row" style="margin-bottom:0.5rem">
+        <label for="ae-enable">Auto Exposure</label>
+        <input type="checkbox" id="ae-enable" checked>
+      </div>
+
+      <div class="slider-row">
+        <div class="slider-header">
+          <label for="sl-exposure">Exposure (µs)</label>
+          <span id="v-exposure">10000</span>
+        </div>
+        <input type="range" id="sl-exposure" min="1000" max="50000" step="500" value="10000"
+               oninput="document.getElementById('v-exposure').textContent=this.value">
+      </div>
+
+      <div class="row" style="margin-bottom:0.5rem">
+        <label for="awb-enable">Auto White Balance</label>
+        <input type="checkbox" id="awb-enable" checked>
+      </div>
+
+      <div class="slider-row">
+        <div class="slider-header">
+          <label for="sl-rgain">Red Gain</label>
+          <span id="v-rgain">1.4</span>
+        </div>
+        <input type="range" id="sl-rgain" min="0.5" max="4.0" step="0.05" value="1.4"
+               oninput="document.getElementById('v-rgain').textContent=parseFloat(this.value).toFixed(2)">
+      </div>
+
+      <div class="slider-row">
+        <div class="slider-header">
+          <label for="sl-bgain">Blue Gain</label>
+          <span id="v-bgain">1.9</span>
+        </div>
+        <input type="range" id="sl-bgain" min="0.5" max="4.0" step="0.05" value="1.9"
+               oninput="document.getElementById('v-bgain').textContent=parseFloat(this.value).toFixed(2)">
+      </div>
+
+      <div class="slider-row">
+        <div class="slider-header">
+          <label for="sl-brightness">Brightness</label>
+          <span id="v-brightness">0.00</span>
+        </div>
+        <input type="range" id="sl-brightness" min="-1.0" max="1.0" step="0.05" value="0.0"
+               oninput="document.getElementById('v-brightness').textContent=parseFloat(this.value).toFixed(2)">
+      </div>
+
+      <div class="slider-row">
+        <div class="slider-header">
+          <label for="sl-contrast">Contrast</label>
+          <span id="v-contrast">1.00</span>
+        </div>
+        <input type="range" id="sl-contrast" min="0.0" max="3.0" step="0.05" value="1.0"
+               oninput="document.getElementById('v-contrast').textContent=parseFloat(this.value).toFixed(2)">
+      </div>
+
+      <div class="slider-row">
+        <div class="slider-header">
+          <label for="sl-sharpness">Sharpness</label>
+          <span id="v-sharpness">1.00</span>
+        </div>
+        <input type="range" id="sl-sharpness" min="-1.0" max="2.0" step="0.05" value="1.0"
+               oninput="document.getElementById('v-sharpness').textContent=parseFloat(this.value).toFixed(2)">
+      </div>
+
+      <div class="slider-row">
+        <div class="slider-header">
+          <label for="sl-saturation">Saturation</label>
+          <span id="v-saturation">1.00</span>
+        </div>
+        <input type="range" id="sl-saturation" min="0.0" max="3.0" step="0.05" value="1.0"
+               oninput="document.getElementById('v-saturation').textContent=parseFloat(this.value).toFixed(2)">
+      </div>
+
+      <button class="btn-primary btn-full" id="btn-apply-controls">Apply Controls</button>
+      <div class="feedback" id="fb-controls"></div>
+    </div>
+
+    <!-- Files -->
+    <div class="section">
+      <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Captured Files</span>
+        <button class="btn-neutral" style="padding:0.15rem 0.5rem;font-size:0.7rem" id="btn-refresh-files">&#8635; Refresh</button>
+      </div>
+      <table id="files-table">
+        <tr><td colspan="3" style="color:#555">Loading…</td></tr>
+      </table>
+    </div>
+
+  </div><!-- controls-panel -->
+</div><!-- main -->
+
+<script>
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function api(path, opts) {
+  return fetch(path, opts).then(r => r.json());
+}
+
+function feedback(id, msg, ok) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'feedback ' + (ok === true ? 'ok' : ok === false ? 'err' : '');
+}
+
+// ── Status polling ────────────────────────────────────────────────────────────
+
+const badge = document.getElementById('status-badge');
+const fcount = document.getElementById('frame-count');
+
+function updateStatus() {
+  api('/api/status').then(d => {
+    const s = d.state || '—';
+    badge.textContent = s;
+    badge.className = 'idle scanning error'.split(' ').reduce((c, k) =>
+      s.includes(k) ? k : c, '') || '';
+    fcount.textContent = d.frame_count > 0 ? d.frame_count + ' frames' : '';
+  }).catch(() => {});
+}
+setInterval(updateStatus, 2000);
+updateStatus();
+
+// ── Presets ───────────────────────────────────────────────────────────────────
+
+function loadPresets() {
+  api('/api/presets').then(d => {
+    const sel = document.getElementById('preset-select');
+    if (d.preset_names && d.preset_names.length) {
+      sel.innerHTML = d.preset_names.map(n =>
+        '<option value="' + n + '">' + n + '</option>'
+      ).join('');
+    } else {
+      sel.innerHTML = '<option value="">No presets</option>';
+    }
+  }).catch(() => {});
+}
+
+// ── Camera current values ─────────────────────────────────────────────────────
+
+function loadCameraValues() {
+  api('/api/camera').then(d => {
+    if (!d.controls) return;
+    const c = d.controls;
+    function setSlider(id, vid, val) {
+      const el = document.getElementById(id);
+      if (el && val !== undefined) {
+        el.value = val;
+        document.getElementById(vid).textContent =
+          id.startsWith('sl-exposure') ? val : parseFloat(val).toFixed(2);
+      }
+    }
+    if (c.AeEnable !== undefined)
+      document.getElementById('ae-enable').checked = c.AeEnable === 'True' || c.AeEnable === 'true';
+    if (c.ExposureTime !== undefined) setSlider('sl-exposure', 'v-exposure', c.ExposureTime);
+    if (c.AwbEnable !== undefined)
+      document.getElementById('awb-enable').checked = c.AwbEnable === 'True' || c.AwbEnable === 'true';
+    if (c.ColourGains !== undefined) {
+      // format: "(r, b)"
+      const m = String(c.ColourGains).match(/([\\d.]+)[^\\d.]+([\\d.]+)/);
+      if (m) {
+        setSlider('sl-rgain', 'v-rgain', parseFloat(m[1]));
+        setSlider('sl-bgain', 'v-bgain', parseFloat(m[2]));
+      }
+    }
+    if (c.Brightness !== undefined)  setSlider('sl-brightness',  'v-brightness',  c.Brightness);
+    if (c.Contrast !== undefined)    setSlider('sl-contrast',    'v-contrast',    c.Contrast);
+    if (c.Sharpness !== undefined)   setSlider('sl-sharpness',   'v-sharpness',   c.Sharpness);
+    if (c.Saturation !== undefined)  setSlider('sl-saturation',  'v-saturation',  c.Saturation);
+
+    // also select current preset if available
+    if (d.preset_name) {
+      const sel = document.getElementById('preset-select');
+      const opt = Array.from(sel.options).find(o => o.value === d.preset_name);
+      if (opt) sel.value = d.preset_name;
+    }
+  }).catch(() => {});
+}
+
+// ── File list ─────────────────────────────────────────────────────────────────
+
+function loadFiles() {
+  api('/files').then(files => {
+    const t = document.getElementById('files-table');
+    if (!files.length) {
+      t.innerHTML = '<tr><td colspan="3" style="color:#555">No files yet.</td></tr>';
+      return;
+    }
+    t.innerHTML = '<tr><th>Name</th><th>Size</th><th></th></tr>' +
+      files.map(f =>
+        '<tr><td style="max-width:8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + f.name + '">' + f.name + '</td>' +
+        '<td style="white-space:nowrap">' + f.size + '</td>' +
+        '<td><a href="/download/' + encodeURIComponent(f.name) + '" download>&#8659;</a></td></tr>'
+      ).join('');
+  }).catch(() => {});
+}
+
+document.getElementById('btn-refresh-files').addEventListener('click', loadFiles);
+
+// ── Capture ───────────────────────────────────────────────────────────────────
+
+document.getElementById('btn-capture').addEventListener('click', function() {
+  this.disabled = true;
+  feedback('fb-capture', 'Capturing…', null);
+  api('/api/capture', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({raw: document.getElementById('raw-check').checked})
+  }).then(d => {
+    feedback('fb-capture', d.success ? '✓ ' + (d.path || 'done') : '✗ ' + d.message, d.success);
+    if (d.success) loadFiles();
+  }).catch(e => feedback('fb-capture', '✗ ' + e, false))
+    .finally(() => { this.disabled = false; });
+});
+
+// ── Motor ─────────────────────────────────────────────────────────────────────
+
+function moveMotor(direction) {
+  const steps = parseInt(document.getElementById('motor-steps').value, 10) || 100;
+  feedback('fb-motor', 'Moving…', null);
+  document.getElementById('btn-forward').disabled = true;
+  document.getElementById('btn-backward').disabled = true;
+  api('/api/motor', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({steps: steps * direction})
+  }).then(d => {
+    feedback('fb-motor', d.success ? '✓ Moved ' + (steps * direction) + ' steps' : '✗ ' + d.message, d.success);
+  }).catch(e => feedback('fb-motor', '✗ ' + e, false))
+    .finally(() => {
+      document.getElementById('btn-forward').disabled = false;
+      document.getElementById('btn-backward').disabled = false;
+    });
+}
+document.getElementById('btn-forward').addEventListener('click', () => moveMotor(1));
+document.getElementById('btn-backward').addEventListener('click', () => moveMotor(-1));
+
+// ── Preset ────────────────────────────────────────────────────────────────────
+
+document.getElementById('btn-preset').addEventListener('click', function() {
+  const name = document.getElementById('preset-select').value;
+  if (!name) return;
+  this.disabled = true;
+  feedback('fb-preset', 'Applying…', null);
+  api('/api/camera/preset', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({preset_name: name})
+  }).then(d => {
+    feedback('fb-preset', d.success ? '✓ ' + name : '✗ ' + d.message, d.success);
+    if (d.success) loadCameraValues();
+  }).catch(e => feedback('fb-preset', '✗ ' + e, false))
+    .finally(() => { this.disabled = false; });
+});
+
+// ── Camera controls ───────────────────────────────────────────────────────────
+
+document.getElementById('btn-apply-controls').addEventListener('click', function() {
+  this.disabled = true;
+  feedback('fb-controls', 'Applying…', null);
+  const body = {
+    ae_enable:     document.getElementById('ae-enable').checked,
+    exposure_time: parseInt(document.getElementById('sl-exposure').value, 10),
+    awb_enable:    document.getElementById('awb-enable').checked,
+    r_gain:        parseFloat(document.getElementById('sl-rgain').value),
+    b_gain:        parseFloat(document.getElementById('sl-bgain').value),
+    brightness:    parseFloat(document.getElementById('sl-brightness').value),
+    contrast:      parseFloat(document.getElementById('sl-contrast').value),
+    sharpness:     parseFloat(document.getElementById('sl-sharpness').value),
+    saturation:    parseFloat(document.getElementById('sl-saturation').value),
+  };
+  api('/api/camera/controls', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  }).then(d => {
+    feedback('fb-controls', d.success ? '✓ Applied' : '✗ ' + d.message, d.success);
+  }).catch(e => feedback('fb-controls', '✗ ' + e, false))
+    .finally(() => { this.disabled = false; });
+});
+
+// ── Exposure meter ───────────────────────────────────────────────────────────
+
+(function () {
+  const SAMPLE_W = 80, SAMPLE_H = 60;
+  const canvas = document.createElement('canvas');
+  canvas.width = SAMPLE_W;
+  canvas.height = SAMPLE_H;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const streamImg = document.querySelector('#preview-panel img');
+  const indicator = document.getElementById('meter-indicator');
+
+  function sampleLuma() {
+    // Only sample when the image has real dimensions (stream active)
+    if (!streamImg.naturalWidth) return null;
+    try {
+      ctx.drawImage(streamImg, 0, 0, SAMPLE_W, SAMPLE_H);
+      const data = ctx.getImageData(0, 0, SAMPLE_W, SAMPLE_H).data;
+      let sum = 0;
+      const pixels = data.length / 4;
+      for (let i = 0; i < data.length; i += 4) {
+        // Rec.601 luminance
+        sum += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      }
+      return sum / pixels; // 0–255
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function updateMeter() {
+    const luma = sampleLuma();
+    if (luma === null) return;
+    // Map luma to EV relative to middle grey (128 ≈ 0 EV), clamp to ±3
+    const ev = luma < 0.5
+      ? -3
+      : Math.max(-3, Math.min(3, Math.log2(luma / 128)));
+    // Map EV [-3,+3] → left percentage [0,100]
+    const pct = ((ev + 3) / 6) * 100;
+    indicator.style.left = pct + '%';
+    // Color: blue=under, green=correct, orange=over
+    const color = ev < -0.5 ? '#3af' : ev > 0.5 ? '#f84' : '#5f5';
+    indicator.style.borderBottomColor = color;
+    indicator.style.filter = `drop-shadow(0 0 3px ${color}88)`;
+  }
+
+  // ~5 fps — lightweight, enough for a light meter
+  setInterval(updateMeter, 200);
+})();
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+loadPresets();
+loadCameraValues();
+loadFiles();
+</script>
+</body>
+</html>
