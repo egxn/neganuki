@@ -126,6 +126,7 @@
     #meter-indicator {
       position: absolute;
       bottom: 3px;
+      left: 50%;
       width: 0;
       height: 0;
       border-left: 5px solid transparent;
@@ -295,7 +296,7 @@
       <div class="section-title">Capture</div>
       <div class="row">
         <label for="raw-check">Raw (DNG)</label>
-        <input type="checkbox" id="raw-check">
+        <input type="checkbox" id="raw-check" checked>
       </div>
       <button class="btn-success btn-full" id="btn-capture">&#9654; Take Photo</button>
       <div class="feedback" id="fb-capture"></div>
@@ -496,10 +497,11 @@ function loadCameraValues() {
     const c = d.controls;
     function setSlider(id, vid, val) {
       const el = document.getElementById(id);
-      if (el && val !== undefined) {
-        el.value = val;
+      const n = parseFloat(val);
+      if (el && !isNaN(n)) {
+        el.value = n;
         document.getElementById(vid).textContent =
-          id.startsWith('sl-exposure') ? val : parseFloat(val).toFixed(2);
+          id === 'sl-exposure' ? Math.round(n) : n.toFixed(2);
       }
     }
     if (c.AeEnable !== undefined)
@@ -508,11 +510,11 @@ function loadCameraValues() {
     if (c.AwbEnable !== undefined)
       document.getElementById('awb-enable').checked = c.AwbEnable === 'True' || c.AwbEnable === 'true';
     if (c.ColourGains !== undefined) {
-      // format: "(r, b)"
-      const m = String(c.ColourGains).match(/([\\d.]+)[^\\d.]+([\\d.]+)/);
+      // format: "r,b" or "(r, b)"
+      const m = String(c.ColourGains).match(/([\d.]+)[^\d.]+([\d.]+)/);
       if (m) {
-        setSlider('sl-rgain', 'v-rgain', parseFloat(m[1]));
-        setSlider('sl-bgain', 'v-bgain', parseFloat(m[2]));
+        setSlider('sl-rgain', 'v-rgain', m[1]);
+        setSlider('sl-bgain', 'v-bgain', m[2]);
       }
     }
     if (c.Brightness !== undefined)  setSlider('sl-brightness',  'v-brightness',  c.Brightness);
@@ -670,8 +672,10 @@ document.getElementById('btn-apply-controls').addEventListener('click', function
   const streamImg = document.querySelector('#preview-panel img');
   const indicator = document.getElementById('meter-indicator');
 
+  // Reference EV for the meter centre — roughly "well-exposed negative on light box"
+  const EV_CENTER = 9;
+
   function sampleLuma() {
-    // Only sample when the image has real dimensions (stream active)
     if (!streamImg.naturalWidth) return null;
     try {
       ctx.drawImage(streamImg, 0, 0, SAMPLE_W, SAMPLE_H);
@@ -679,7 +683,6 @@ document.getElementById('btn-apply-controls').addEventListener('click', function
       let sum = 0;
       const pixels = data.length / 4;
       for (let i = 0; i < data.length; i += 4) {
-        // Rec.601 luminance
         sum += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
       }
       return sum / pixels; // 0–255
@@ -689,29 +692,39 @@ document.getElementById('btn-apply-controls').addEventListener('click', function
   }
 
   function updateMeter() {
-    const luma = sampleLuma();
-    if (luma === null) return;
-    // Map luma to EV relative to middle grey (128 ≈ 0 EV), clamp to ±3
-    const ev = luma < 0.5
-      ? -3
-      : Math.max(-3, Math.min(3, Math.log2(luma / 128)));
-    // Map EV [-3,+3] → left percentage [0,100]
-    const pct = ((ev + 3) / 6) * 100;
-    indicator.style.left = pct + '%';
-    // Color: blue=under, green=correct, orange=over
-    const color = ev < -0.5 ? '#3af' : ev > 0.5 ? '#f84' : '#5f5';
-    indicator.style.borderBottomColor = color;
-    indicator.style.filter = `drop-shadow(0 0 3px ${color}88)`;
-
-    // EV readout: EV = log2(N² / t)
+    // Settings-based EV: always available, drives indicator position
     const fstopEl = document.getElementById('sl-fstop');
     const expEl   = document.getElementById('sl-exposure');
     const evLabel = document.getElementById('meter-ev');
-    if (fstopEl && expEl && evLabel) {
+
+    if (fstopEl && expEl) {
       const N = parseFloat(fstopEl.value);
       const t = parseInt(expEl.value, 10) / 1e6; // µs → s
-      const settingsEv = Math.log2((N * N) / t);
-      evLabel.textContent = 'EV ' + settingsEv.toFixed(1) + '  \u2022  f/' + N + '  ' + expEl.value + 'µs';
+      if (N > 0 && t > 0) {
+        const settingsEv = Math.log2((N * N) / t);
+        // Deviation from reference → ±3 scale
+        const dev = Math.max(-3, Math.min(3, settingsEv - EV_CENTER));
+        const pct = ((dev + 3) / 6) * 100;
+        indicator.style.left = pct + '%';
+
+        // Color based on deviation
+        const color = dev < -0.5 ? '#3af' : dev > 0.5 ? '#f84' : '#5f5';
+        indicator.style.borderBottomColor = color;
+        indicator.style.filter = 'drop-shadow(0 0 3px ' + color + '88)';
+
+        if (evLabel) {
+          evLabel.textContent = 'EV ' + settingsEv.toFixed(1) + '  \u2022  f/' + N + '  ' + expEl.value + '\u00b5s';
+        }
+      }
+    }
+
+    // Optional: use scene luminance for color fine-tuning
+    const luma = sampleLuma();
+    if (luma !== null) {
+      const sceneEv = luma < 0.5 ? -3 : Math.max(-3, Math.min(3, Math.log2(luma / 128)));
+      const color = sceneEv < -0.5 ? '#3af' : sceneEv > 0.5 ? '#f84' : '#5f5';
+      indicator.style.borderBottomColor = color;
+      indicator.style.filter = 'drop-shadow(0 0 3px ' + color + '88)';
     }
   }
 
