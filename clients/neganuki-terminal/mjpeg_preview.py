@@ -142,34 +142,48 @@ class MJPEGHandler(BaseHTTPRequestHandler):
     # ── Routing ───────────────────────────────────────────────────────────────
 
     def do_GET(self):  # noqa: N802
-        if self.path in ("/", "/index.html"):
-            self._send_index()
-        elif self.path == "/stream":
-            self._send_mjpeg_stream()
-        elif self.path == "/files":
-            self._send_file_list()
-        elif self.path == "/api/status":
-            self._api_get_status()
-        elif self.path == "/api/presets":
-            self._api_list_presets()
-        elif self.path == "/api/camera":
-            self._api_get_camera()
-        elif self.path.startswith("/download/"):
-            self._send_file(self.path[len("/download/"):])
-        else:
-            self.send_error(404, "Not found")
+        try:
+            if self.path in ("/", "/index.html"):
+                self._send_index()
+            elif self.path == "/stream":
+                self._send_mjpeg_stream()
+            elif self.path == "/files":
+                self._send_file_list()
+            elif self.path == "/api/status":
+                self._api_get_status()
+            elif self.path == "/api/presets":
+                self._api_list_presets()
+            elif self.path == "/api/camera":
+                self._api_get_camera()
+            elif self.path.startswith("/download/"):
+                self._send_file(self.path[len("/download/"):])
+            else:
+                self.send_error(404, "Not found")
+        except Exception as exc:
+            log.error("Unhandled error in GET %s: %s", self.path, exc, exc_info=True)
+            try:
+                self._json_err(f"Internal error: {exc}", status=500)
+            except Exception:
+                pass
 
     def do_POST(self):  # noqa: N802
-        if self.path == "/api/capture":
-            self._api_capture()
-        elif self.path == "/api/motor":
-            self._api_motor()
-        elif self.path == "/api/camera/controls":
-            self._api_camera_controls()
-        elif self.path == "/api/camera/preset":
-            self._api_camera_preset()
-        else:
-            self.send_error(404, "Not found")
+        try:
+            if self.path == "/api/capture":
+                self._api_capture()
+            elif self.path == "/api/motor":
+                self._api_motor()
+            elif self.path == "/api/camera/controls":
+                self._api_camera_controls()
+            elif self.path == "/api/camera/preset":
+                self._api_camera_preset()
+            else:
+                self.send_error(404, "Not found")
+        except Exception as exc:
+            log.error("Unhandled error in POST %s: %s", self.path, exc, exc_info=True)
+            try:
+                self._json_err(f"Internal error: {exc}", status=500)
+            except Exception:
+                pass
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -184,6 +198,7 @@ class MJPEGHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
@@ -218,6 +233,9 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             }))
         except grpc.RpcError as e:
             self._json_err(e.details())
+        except Exception as e:
+            log.error("GetStatus unexpected error: %s", e, exc_info=True)
+            self._json_err(str(e))
 
     def _api_list_presets(self):
         import json
@@ -233,6 +251,9 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             }))
         except grpc.RpcError as e:
             self._json_err(e.details())
+        except Exception as e:
+            log.error("ListPresets unexpected error: %s", e, exc_info=True)
+            self._json_err(str(e))
 
     def _api_get_camera(self):
         import json
@@ -249,6 +270,9 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             }))
         except grpc.RpcError as e:
             self._json_err(e.details())
+        except Exception as e:
+            log.error("GetCamera unexpected error: %s", e, exc_info=True)
+            self._json_err(str(e))
 
     # ── POST API ──────────────────────────────────────────────────────────────
 
@@ -269,6 +293,9 @@ class MJPEGHandler(BaseHTTPRequestHandler):
         except grpc.RpcError as e:
             log.error("CaptureFrame gRPC error: %s", e.details())
             self._json_err(e.details())
+        except Exception as e:
+            log.error("CaptureFrame unexpected error: %s", e, exc_info=True)
+            self._json_err(str(e))
 
     def _api_motor(self):
         stub = self._stub()
@@ -284,6 +311,9 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             self._json_err("'steps' must be an integer")
         except grpc.RpcError as e:
             self._json_err(e.details())
+        except Exception as e:
+            log.error("MoveMotor unexpected error: %s", e, exc_info=True)
+            self._json_err(str(e))
 
     def _api_camera_controls(self):
         stub = self._stub()
@@ -313,6 +343,9 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             self._json_err(str(e))
         except grpc.RpcError as e:
             self._json_err(e.details())
+        except Exception as e:
+            log.error("SetCameraControls unexpected error: %s", e, exc_info=True)
+            self._json_err(str(e))
 
     def _api_camera_preset(self):
         stub = self._stub()
@@ -334,24 +367,31 @@ class MJPEGHandler(BaseHTTPRequestHandler):
         except grpc.RpcError as e:
             log.error("SetCameraPreset gRPC error: %s", e.details())
             self._json_err(e.details())
+        except Exception as e:
+            log.error("SetCameraPreset unexpected error: %s", e, exc_info=True)
+            self._json_err(str(e))
 
     # ── Static file serving ───────────────────────────────────────────────────
 
     def _send_file_list(self):
         import json
-        entries = []
-        if _output_dir.is_dir():
-            for f in sorted(_output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-                if f.is_file():
-                    size = f.stat().st_size
-                    if size >= 1_048_576:
-                        size_str = f"{size / 1_048_576:.1f} MB"
-                    elif size >= 1024:
-                        size_str = f"{size / 1024:.0f} KB"
-                    else:
-                        size_str = f"{size} B"
-                    entries.append({"name": f.name, "size": size_str})
-        self._send_json(json.dumps(entries))
+        try:
+            entries = []
+            if _output_dir.is_dir():
+                for f in sorted(_output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                    if f.is_file():
+                        size = f.stat().st_size
+                        if size >= 1_048_576:
+                            size_str = f"{size / 1_048_576:.1f} MB"
+                        elif size >= 1024:
+                            size_str = f"{size / 1024:.0f} KB"
+                        else:
+                            size_str = f"{size} B"
+                        entries.append({"name": f.name, "size": size_str})
+            self._send_json(json.dumps(entries))
+        except Exception as e:
+            log.error("File list error: %s", e, exc_info=True)
+            self._send_json(json.dumps([]))
 
     def _send_file(self, filename: str):
         from urllib.parse import unquote
@@ -391,6 +431,7 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             f"multipart/x-mixed-replace; boundary={BOUNDARY.decode()}",
         )
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Connection", "close")
         self.end_headers()
 

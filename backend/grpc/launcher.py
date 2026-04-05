@@ -18,7 +18,7 @@ import signal
 import sys
 import threading
 import time
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 logging.basicConfig(
@@ -66,7 +66,7 @@ def _start_grpc_server(controller, host: str, port: int) -> "GRPCServer":
     return srv
 
 
-def _start_mjpeg_server(grpc_port: int, http_port: int, fps: int, quality: int) -> HTTPServer:
+def _start_mjpeg_server(grpc_port: int, http_port: int, fps: int, quality: int) -> ThreadingHTTPServer:
     """Import the MJPEG machinery, start the background gRPC reader, and return the HTTPServer."""
     # Import shared state and classes from the standalone mjpeg_preview module.
     # We add the clients directory to sys.path temporarily.
@@ -85,7 +85,8 @@ def _start_mjpeg_server(grpc_port: int, http_port: int, fps: int, quality: int) 
     )
     reader_thread.start()
 
-    server = HTTPServer(("0.0.0.0", http_port), mp.MJPEGHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", http_port), mp.MJPEGHandler)
+    server.daemon_threads = True
     log.info("MJPEG preview server at http://0.0.0.0:%d/", http_port)
     return server
 
@@ -128,7 +129,7 @@ def main() -> None:
         sys.exit(1)
 
     # ── 3. MJPEG preview server ───────────────────────────────────────────────
-    http_server: HTTPServer | None = None
+    http_server: ThreadingHTTPServer | None = None
     if not args.no_preview:
         # Give gRPC server a moment to be ready before the reader connects.
         time.sleep(0.5)
