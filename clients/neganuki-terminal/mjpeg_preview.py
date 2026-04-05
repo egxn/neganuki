@@ -137,7 +137,7 @@ class MJPEGHandler(BaseHTTPRequestHandler):
     """HTTP handler — serves the HTML page, MJPEG stream, and control API."""
 
     def log_message(self, fmt, *args):  # noqa: N802
-        pass
+        log.debug("%s - %s", self.client_address[0], fmt % args)
 
     # ── Routing ───────────────────────────────────────────────────────────────
 
@@ -260,9 +260,14 @@ class MJPEGHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json_body()
             raw = bool(body.get("raw", False))
+            log.info("CaptureFrame request (raw=%s)", raw)
             resp = stub.CaptureFrame(scanner_pb2.FrameCaptureRequest(raw=raw), timeout=15)
-            self._json_ok(path=resp.path, message=resp.message)
+            if resp.success:
+                self._json_ok(path=resp.path, message=resp.message)
+            else:
+                self._json_err(resp.message)
         except grpc.RpcError as e:
+            log.error("CaptureFrame gRPC error: %s", e.details())
             self._json_err(e.details())
 
     def _api_motor(self):
@@ -298,8 +303,12 @@ class MJPEGHandler(BaseHTTPRequestHandler):
                 sharpness=float(body.get("sharpness", 1.0)),
                 saturation=float(body.get("saturation", 1.0)),
             )
+            log.info("SetCameraControls request: exposure=%d", req.exposure_time)
             resp = stub.SetCameraControls(req, timeout=5)
-            self._json_ok(message=resp.message)
+            if resp.success:
+                self._json_ok(message=resp.message)
+            else:
+                self._json_err(resp.message)
         except (ValueError, TypeError) as e:
             self._json_err(str(e))
         except grpc.RpcError as e:
@@ -316,9 +325,14 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             if not name:
                 self._json_err("'preset_name' is required")
                 return
+            log.info("SetCameraPreset request: '%s'", name)
             resp = stub.SetCameraPreset(scanner_pb2.SetPresetRequest(preset_name=name), timeout=5)
-            self._json_ok(message=resp.message)
+            if resp.success:
+                self._json_ok(message=resp.message)
+            else:
+                self._json_err(resp.message)
         except grpc.RpcError as e:
+            log.error("SetCameraPreset gRPC error: %s", e.details())
             self._json_err(e.details())
 
     # ── Static file serving ───────────────────────────────────────────────────

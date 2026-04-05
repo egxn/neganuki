@@ -281,7 +281,7 @@
         </div>
         <div id="meter-indicator"></div>
       </div>
-      <div class="meter-caption">exposure</div>
+      <div class="meter-caption"><span id="meter-ev">exposure</span></div>
     </div>
 
     <img src="/stream" alt="live preview">
@@ -330,6 +330,25 @@
       <div class="row" style="margin-bottom:0.5rem">
         <label for="ae-enable">Auto Exposure</label>
         <input type="checkbox" id="ae-enable" checked>
+      </div>
+
+      <div class="slider-row">
+        <div class="slider-header">
+          <label for="sl-fstop">f-stop</label>
+          <span id="v-fstop">f/2.8</span>
+        </div>
+        <select id="sl-fstop" style="margin-bottom:0.5rem"
+                onchange="document.getElementById('v-fstop').textContent='f/'+this.value">
+          <option value="1.4">f/1.4</option>
+          <option value="2">f/2</option>
+          <option value="2.8" selected>f/2.8</option>
+          <option value="4">f/4</option>
+          <option value="5.6">f/5.6</option>
+          <option value="8">f/8</option>
+          <option value="11">f/11</option>
+          <option value="16">f/16</option>
+          <option value="22">f/22</option>
+        </select>
       </div>
 
       <div class="slider-row">
@@ -422,7 +441,10 @@
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function api(path, opts) {
-  return fetch(path, opts).then(r => r.json());
+  return fetch(path, opts).then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  });
 }
 
 function feedback(id, msg, ok) {
@@ -450,7 +472,8 @@ updateStatus();
 
 // ── Presets ───────────────────────────────────────────────────────────────────
 
-function loadPresets() {
+function loadPresets(retries) {
+  retries = retries === undefined ? 3 : retries;
   api('/api/presets').then(d => {
     const sel = document.getElementById('preset-select');
     if (d.preset_names && d.preset_names.length) {
@@ -460,7 +483,9 @@ function loadPresets() {
     } else {
       sel.innerHTML = '<option value="">No presets</option>';
     }
-  }).catch(() => {});
+  }).catch(() => {
+    if (retries > 0) setTimeout(() => loadPresets(retries - 1), 2000);
+  });
 }
 
 // ── Camera current values ─────────────────────────────────────────────────────
@@ -677,6 +702,17 @@ document.getElementById('btn-apply-controls').addEventListener('click', function
     const color = ev < -0.5 ? '#3af' : ev > 0.5 ? '#f84' : '#5f5';
     indicator.style.borderBottomColor = color;
     indicator.style.filter = `drop-shadow(0 0 3px ${color}88)`;
+
+    // EV readout: EV = log2(N² / t)
+    const fstopEl = document.getElementById('sl-fstop');
+    const expEl   = document.getElementById('sl-exposure');
+    const evLabel = document.getElementById('meter-ev');
+    if (fstopEl && expEl && evLabel) {
+      const N = parseFloat(fstopEl.value);
+      const t = parseInt(expEl.value, 10) / 1e6; // µs → s
+      const settingsEv = Math.log2((N * N) / t);
+      evLabel.textContent = 'EV ' + settingsEv.toFixed(1) + '  \u2022  f/' + N + '  ' + expEl.value + 'µs';
+    }
   }
 
   // ~5 fps — lightweight, enough for a light meter
