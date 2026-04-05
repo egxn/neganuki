@@ -66,7 +66,8 @@ def _start_grpc_server(controller, host: str, port: int) -> "GRPCServer":
     return srv
 
 
-def _start_mjpeg_server(grpc_port: int, http_port: int, fps: int, quality: int) -> ThreadingHTTPServer:
+def _start_mjpeg_server(grpc_port: int, http_port: int, fps: int, quality: int,
+                        output_dir: Path) -> ThreadingHTTPServer:
     """Import the MJPEG machinery, start the background gRPC reader, and return the HTTPServer."""
     # Import shared state and classes from the standalone mjpeg_preview module.
     # We add the clients directory to sys.path temporarily.
@@ -74,7 +75,19 @@ def _start_mjpeg_server(grpc_port: int, http_port: int, fps: int, quality: int) 
     if str(clients_dir) not in sys.path:
         sys.path.insert(0, str(clients_dir))
 
+    import grpc as _grpc
     import mjpeg_preview as mp  # type: ignore[import]
+
+    # Initialize the shared gRPC control stub so API handlers work.
+    # (mjpeg_preview.main() sets these, but it is not called from the launcher.)
+    address = f"localhost:{grpc_port}"
+    mp._grpc_channel = _grpc.insecure_channel(address)
+    with mp._ctrl_lock:
+        mp._ctrl_stub = mp.scanner_pb2_grpc.ScannerServiceStub(mp._grpc_channel)
+    log.info("MJPEG control stub connected to %s", address)
+
+    # Set the output directory for the file list / download endpoints.
+    mp._output_dir = output_dir
 
     reader_thread = threading.Thread(
         target=mp._grpc_reader,
@@ -139,6 +152,7 @@ def main() -> None:
                 http_port=args.http_port,
                 fps=args.preview_fps,
                 quality=args.preview_quality,
+                output_dir=output_dir,
             )
             http_thread = threading.Thread(
                 target=http_server.serve_forever,
